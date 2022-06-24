@@ -1,0 +1,343 @@
+# Copyright 2022 Carnegie Mellon University Neuromechatronics Lab
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Contact: Jonathan Shulgach (jshulgac@andrew.cmu.edu)
+
+import os
+import glob
+import re
+from openpyxl import load_workbook, Workbook
+import pandas as pd
+import numpy as np
+from nml_bag.reader import Reader
+
+
+class BagParser:
+    """ A ROS2 bag file parser that utilizes the nml_bag 'Reader' Class and its ROS2 Bag file wrappers
+       to collect information about the task experiment recorded.
+
+    Parameters
+    ----------
+    *args : list
+        Arguments passed to superclass constructor_.
+
+        .. _constructor: https://github.com/ros2/rosbag2/blob
+                         /fada54cc2c93d4238f3971e9ce6ea0006ac85c8c/rosbag2_cpp
+                         /src/rosbag2_cpp/readers/sequential_reader.cpp#L60
+    filepath : str
+        Bag file path to open. If not specified, then the :py:func`open`
+        function must be invoked before accessing any other class functionality.
+    *kargs : dict
+        Keyword arguments passed to superclass constructor_.
+
+    === Below is the instruction summary of the rosbag parser object ===
+    A ROS2 bag sequential reader class tailored to NML experimental data.
+
+    Subclass of SequentialReader_ from the ros2bag_ package.
+
+    .. _SequentialReader: https://github.com/ros2/rosbag2/blob/master
+                          /rosbag2_cpp/src/rosbag2_cpp/readers
+                          /sequential_reader.cpp
+    .. _ros2bag: https://github.com/ros2/rosbag2#rosbag2
+
+    -------------------------------------
+    Notes from the 'Reader' class
+    -------------------------------------
+
+    In the current version of the ROS2 bag package, ``seek`` functionality has
+    not yet been implemented_. Until this is implemented, we recommend opening
+    a new :py:class`Reader` each time the position is to be reset.
+
+    .. _implemented: https://github.com/ros2/rosbag2/blob
+                     /fada54cc2c93d4238f3971e9ce6ea0006ac85c8c/rosbag2_cpp
+                     /src/rosbag2_cpp/readers/sequential_reader.cpp#L198
+
+
+    reader = Reader(f'{bag_path}{sep}bag_test_0.db3')
+    reader.topics
+    ['test_topic']
+    reader.type_map
+    {'test_topic': 'example_interfaces/msg/String'}
+    reader.records
+    [{'topic': 'test_topic', 'time_ns': ..., 'data': 'Hello World!'},
+     {'topic': 'test_topic', 'time_ns': ..., 'data': 'Goodybye World!'}]
+    tempdir.cleanup()
+
+    """
+
+    def __init__(self, files=None, verbose=False, **kwargs):
+        self.verbose = verbose
+        self.files = files
+        self.reader_obj = None
+        if files:
+            self.reader_obj = self.read_bag_file(files)
+            if self.verbose: print("Reading files completed")
+
+    def read_bag_file(self, file_path):
+        """ Opens the bag file specified by the parameter input.
+
+        Parameters
+        ----------
+        file_path - Can be single string or list of strings to concatenate data from multiple files
+
+        Returns
+        -------
+        obj - list of Reader object(s) containing ROS2 bag file data from each file read
+        """
+        obj = []
+        if type(file_path) == str:
+            if self.verbose: print('Reading bag file from {}'.format(file_path))
+            obj[0] = Reader(file_path)
+        if type(file_path) == list:
+            for file in file_path:
+                if self.verbose: print('Reading bag file from {}'.format(file))
+                obj.append(Reader(file))
+
+        return obj
+
+    def get_bag_topics(self, return_topics=False):
+        """ Gets the topics found in the bag files. Defaults to the first bag object in memory, assumes other
+         bag files have the same topics. Optio to return list of topics
+         """
+        print("Found topics: \n  " + self.reader_obj[0].topics)
+        if return_topics:
+            return self.reader_obj[0].topics
+
+    def get_bag_data(self, bag_topic, options=None):
+        """
+            Parameters
+            ----------
+            bag_topic : (str) topic to access
+            options : (list) list containing keywords for data types ('cursor' | 'state') TO-DO
+
+            Return
+            ---------
+            parsed_topic_df : (Dataframe) pandas dataframe table of parsed topic data
+
+            Notes
+            --------
+            The 'options' parameter can be expanded for more unique data types as DataAgent evolves
+
+        """
+        parsed_topic_data = []
+        if not type(bag_topic) == str:
+            print("bag topic input must be string")
+            return None
+
+        if self.verbose:
+            print("Grabbing data from {}".format(bag_topic))
+
+        for reader in self.reader_obj:
+            for el in reader:
+                if el['topic'] == bag_topic:
+                    parsed_topic_data.append(el)
+
+        parsed_topic_df = pd.DataFrame(parsed_topic_data)
+        return parsed_topic_df
+
+    def get_cursor_data(self):
+        """ Extract rows matching topic '/cursor/position'.
+            Output will be list of dict elements {position, timestamp, datatype, data}
+        """
+        df = self.get_bag_data('/cursor/position')
+        return df
+
+    def get_trial_performance(self):
+        """ Helper function that gets the task performance statistics
+
+        Returns
+        ---------
+        N_trials: (int) total trials from success and failure combined states
+        N_success: (int) total success states
+        N_failure: (int) total failure states
+        """
+        df = self.get_bag_data('/task/center_out/state')
+        n_success = len(df[df['data'] == 'success'])
+        n_failure = len(df[df['data'] == 'failure'])
+        n_trials = n_success + n_failure
+
+        return n_trials, n_success, n_failure
+
+
+class DataAgent:
+    """ A data sorting agent that searches a directory for matching file types and extracts file data with keyword inputs.
+
+    Parameters
+    ----------
+    *args : (list) system arguments passed through to the constructor
+    file_type: (str) file type to search for in all folders from root directory
+    verbose: (bool) enable/disable verbose output
+    """
+
+    def __init__(self, file_type='.db3', verbose=False):
+        self.parent_dir = None
+        self.file_type = file_type
+        self.notebook_headers = None
+        self.verbose = verbose
+        self.file_list = []
+        self.date_list = []
+
+        # These shouldn't need to change
+        self.notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records'
+
+    def check_path(self, args):
+        """Checks the folder directory as a valid path and looks for bag files in subdirectories
+        """
+        if len(args) > 1:
+            parent_folder = args[1]
+            if len(args) > 2:
+                self.file_type = args[2]
+        else:
+            parent_folder = input("Please enter the parent folder directory: ")
+
+        # check that the parent directory is the one desired
+        if not os.path.isdir(parent_folder):
+            print("Error - path not valid: {}".format(parent_folder))
+            return False
+        else:
+            self.parent_dir = parent_folder
+            if self.verbose:
+                print('Valid root directory')
+            return True
+
+    def set_notebook_headers(self, args, output=False):
+        if len(args) > 3:
+            self.notebook_headers = args[3].split(',')
+            if self.verbose:
+                print('Filling in Notebook options:')
+                if self.notebook_headers is not None:
+                    for n in self.notebook_headers:
+                        print("\t" + n)
+        else:
+            print("No notebook data columns specified...")
+        if output:
+            return self.notebook_headers
+
+    def get_notebook_data(self, animal, use_dataframe=True):
+        """ Access the notebook training data from the NML_NHP shared drive for the animal specified
+
+            TO-DO: auto-cycle through years
+        """
+        file_name = os.path.join(self.notebook_path, animal + '.xlsx')
+        d = None
+        w = None
+        # check that the notebook directory is valid
+        if not os.path.isfile(file_name):
+            print("Error - path not valid: {}".format(file_name))
+        else:
+            print("Found notebook '{}.xlsx'".format(animal))
+            if use_dataframe:
+                dfs = pd.read_excel(file_name, None)
+                d = dfs[list(dfs)[1]]  # Return notebook data for 2022
+            else:
+                d = load_workbook(filename=file_name, keep_vba=True)
+
+        return d
+
+    def update_notebook(self, nb_df, date_str, data):
+        """ Updates the dataframe with the new data specified by the date and header name
+        """
+        for header in data:
+            # index of date
+            date_idx = nb_df.index[nb_df[nb_df.columns[0]] == date_str].tolist()[0]
+            nb_df.loc[date_idx, header] = data[header]  # replace date,header index with new value
+
+        return nb_df
+
+    def check_notebook_entry(self, table, date_str, headers, overwrite=False):
+        """ Check which headers are empty for new date entry, if not then skip
+        """
+        if headers is not None:
+            skip = [False for i in range(len(headers))]
+            for h, header in enumerate(headers):
+                if isinstance(table, pd.DataFrame):
+                    if header not in table.columns:
+                        if self.verbose: print("Warning - {} not found in data frame columns".format(header))
+                    else:
+                        date_idx = table.index[table[table.columns[0]] == date_str].tolist()[0]
+                        if not np.isnan(table.loc[date_idx, header]):
+                            if self.verbose: print("Warning - {} already contains data. Skipping")
+                            if not overwrite:
+                                skip[h] = True
+                if isinstance(table, Workbook):
+                    # Only supporting dataframes for now
+                    pass
+        else:
+            print("No header field names specified")
+            skip = None
+
+        return skip
+
+    def parse_str_date_info(self, string):
+        """ Internal parser function to extract the date from a file name
+
+        date_str: (str) output string in a date format of 'm/d/yy' (can be changed if notebook changes)
+        """
+        temp = re.search('[0-9]{6}', string)
+        dd = int(temp[0][4:6])
+        mm = int(temp[0][2:4])
+        yy = int(temp[0][:2])
+        info_str = str(mm) + "/" + str(dd) + "/" + str(yy)
+
+        return info_str, temp.group()
+
+    def parse_files(self, data):
+        """"""
+        parsed_data = {}
+        for date_str, str_list in data.items():
+            if date_str not in parsed_data:
+                parsed_data[date_str] = None
+
+            # Get times and file keys
+            times_list = []
+            keys_list = []
+            for string in str_list:
+                temp = re.findall('(\d+)(?=.)', string)
+                times_list.append(temp[3])
+                keys_list.append(temp[4])
+
+            max_idx = [i for i, value in enumerate(keys_list) if value == max(keys_list)]
+            time_match = times_list[max_idx[-1]]  # time substring files
+            if self.verbose:
+                print("Largest key found: {} from {}".format(keys_list[max_idx[-1]], time_match))
+
+            # Fill new dictionary with filtered list of files
+            parsed_data[date_str] = [j for j in str_list if time_match in j]
+
+        print("Sorted files with most consecutive keys")
+        return parsed_data
+
+    def get_files(self):
+        """ Recursively goes through each folder and returns a dict with the file names for each day.
+            Days with multiple files in them are numerically arranged
+        """
+
+        print("Searching for files...")
+        self.file_list = glob.glob(self.parent_dir + "/**/*" + self.file_type, recursive=True)
+        print("Found {} files with file type '{}'".format(len(self.file_list), self.file_type))
+        if self.verbose:
+            print("Files found in '{}' matching '{}' file type:".format(self.parent_dir, self.file_type))
+            for item in self.file_list:
+                print("\t" + item)
+
+        # Collect all dates present in files to initialize dictionary
+        data = {}
+        for item in self.file_list:
+            date_str, matched_str = self.parse_str_date_info(item)
+            if date_str not in data:
+                self.date_list.append([date_str, matched_str])
+                data[date_str] = None
+
+        # Fill dictionary date keys with lists of corresponding files
+        for date in self.date_list:
+            data[date[0]] = [i for i in self.file_list if date[1] in i]
+            if self.verbose:
+                print("Files matching {}: {}".format(date[1], data[date[0]]))
+
+        # Before returning list, sort files by arranging them in specified order
+        filtered_data = self.parse_files(data)
+
+        return filtered_data

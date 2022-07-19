@@ -87,6 +87,7 @@ class BagParser:
         -------
         obj - list of Reader object(s) containing ROS2 bag file data from each file read
         """
+        print("Reading bag file")
         obj = []
         if type(file_path) == str:
             if self.verbose: print('Reading bag file from {}'.format(file_path))
@@ -95,6 +96,8 @@ class BagParser:
             for file in file_path:
                 if self.verbose: print('Reading bag file from {}'.format(file))
                 obj.append(Reader(file))
+        else:
+            print('Error -  Be sure to pass a string directory or list of string directories')
 
         return obj
 
@@ -106,37 +109,7 @@ class BagParser:
         if return_topics:
             return self.reader_obj[0].topics
 
-    def get_bag_data(self, bag_topic, options=None):
-        """
-            Parameters
-            ----------
-            bag_topic : (str) topic to access
-            options : (list) list containing keywords for data types ('cursor' | 'state') TO-DO
 
-            Return
-            ---------
-            parsed_topic_df : (Dataframe) pandas dataframe table of parsed topic data
-
-            Notes
-            --------
-            The 'options' parameter can be expanded for more unique data types as DataAgent evolves
-
-        """
-        parsed_topic_data = []
-        if not type(bag_topic) == str:
-            print("bag topic input must be string")
-            return None
-
-        if self.verbose:
-            print("Grabbing data from {}".format(bag_topic))
-
-        for reader in self.reader_obj:
-            for el in reader:
-                if el['topic'] == bag_topic:
-                    parsed_topic_data.append(el)
-
-        parsed_topic_df = pd.DataFrame(parsed_topic_data)
-        return parsed_topic_df
 
     def get_cursor_data(self):
         """ Extract rows matching topic '/cursor/position'.
@@ -145,21 +118,7 @@ class BagParser:
         df = self.get_bag_data('/cursor/position')
         return df
 
-    def get_trial_performance(self):
-        """ Helper function that gets the task performance statistics
 
-        Returns
-        ---------
-        N_trials: (int) total trials from success and failure combined states
-        N_success: (int) total success states
-        N_failure: (int) total failure states
-        """
-        df = self.get_bag_data('/task/center_out/state')
-        n_success = len(df[df['data'] == 'success'])
-        n_failure = len(df[df['data'] == 'failure'])
-        n_trials = n_success + n_failure
-
-        return n_trials, n_success, n_failure
 
 
 class DataAgent:
@@ -179,18 +138,16 @@ class DataAgent:
         self.verbose = verbose
         self.file_list = []
         self.date_list = []
+        self.data = None
+        self.parser = BagParser()
 
         # These shouldn't need to change
         self.notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records'
 
-    def check_path(self, args):
+    def check_path(self, parent_folder=None):
         """Checks the folder directory as a valid path and looks for bag files in subdirectories
         """
-        if len(args) > 1:
-            parent_folder = args[1]
-            if len(args) > 2:
-                self.file_type = args[2]
-        else:
+        if parent_folder is None:
             parent_folder = input("Please enter the parent folder directory: ")
 
         # check that the parent directory is the one desired
@@ -198,19 +155,19 @@ class DataAgent:
             print("Error - path not valid: {}".format(parent_folder))
             return False
         else:
+            # Saves directory to object (might be useful)
             self.parent_dir = parent_folder
             if self.verbose:
                 print('Valid root directory')
             return True
 
     def set_notebook_headers(self, args, output=False):
-        if len(args) > 3:
-            self.notebook_headers = args[3].split(',')
-            if self.verbose:
-                print('Filling in Notebook options:')
-                if self.notebook_headers is not None:
-                    for n in self.notebook_headers:
-                        print("\t" + n)
+        self.notebook_headers = args.split(',')
+        if self.verbose:
+            print('Filling in Notebook options:')
+            if self.notebook_headers is not None:
+                for n in self.notebook_headers:
+                    print("\t" + n)
         else:
             print("No notebook data columns specified...")
         if output:
@@ -309,11 +266,25 @@ class DataAgent:
 
         print("Sorted files with most consecutive keys")
         return parsed_data
-
-    def get_files(self):
+        
+    def has_data(self):
+        if self.data is not None:
+            return true
+        else:
+            return false
+            
+    def read_files(self, files=None):
+        self._data = self.parser.read_bag_file(files)
+        
+    def get_files(self, file_path=None, file_type=None):
         """ Recursively goes through each folder and returns a dict with the file names for each day.
             Days with multiple files in them are numerically arranged
         """
+        
+        if file_path is not None and type(file_path)==str:
+            self.parent_dir = file_path
+        if file_type is not None and type(file_type)==str:
+            self.file_type = file_type
 
         print("Searching for files...")
         self.file_list = glob.glob(self.parent_dir + "/**/*" + self.file_type, recursive=True)
@@ -341,3 +312,58 @@ class DataAgent:
         filtered_data = self.parse_files(data)
 
         return filtered_data
+        
+    def get_topic_data(self, topic, options=None):
+        """
+            Parameters
+            ----------
+            bag_topic : (str) topic to access
+            options : (list) list containing keywords for data types ('cursor' | 'state') TO-DO
+
+            Return
+            ---------
+            parsed_topic_df : (Dataframe) pandas dataframe table of parsed topic data
+
+            Notes
+            --------
+            The 'options' parameter can be expanded for more unique data types as DataAgent evolves
+
+        """
+        parsed_topic_data = []
+        if not type(topic) == str:
+            print("bag topic input must be string")
+            return None
+
+        if self.verbose:
+            print("Grabbing data from {}".format(topic))
+        
+        reader_obj = self._data
+        for reader in reader_obj:
+            for el in reader.records:
+                if el['topic'] == topic:
+                    parsed_topic_data.append(el)
+
+        if len(parsed_topic_data) > 0:
+            parsed_topic_df = pd.DataFrame(parsed_topic_data)
+        else:
+            print("Warning - Could not find data with topic {}".format(topic))
+            parsed_topic_df = None
+        return parsed_topic_df
+
+    def get_trial_performance(self):
+        """ Helper function that gets the task performance statistics
+
+        Returns
+        ---------
+        N_trials: (int) total trials from success and failure combined states
+        N_success: (int) total success states
+        N_failure: (int) total failure states
+        """
+        df = self.get_topic_data('/task/center_out/state')
+        if df is not None:
+            n_success = len(df[df['data'] == 'success'])
+            n_failure = len(df[df['data'] == 'failure'])
+            n_trials = n_success + n_failure
+            return n_trials, n_success, n_failure
+        else:
+            return 0, 0, 0

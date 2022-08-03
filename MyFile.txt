@@ -1,7 +1,0 @@
-7/7/22,N:500,Success:354,Failure:146
-7/8/22,N:251,Success:65,Failure:186
-7/11/22,N:459,Success:306,Failure:153
-7/12/22,N:885,Success:768,Failure:117
-7/13/22,N:285,Success:127,Failure:158
-7/14/22,N:471,Success:334,Failure:137
-7/15/22,N:597,Success:406,Failure:191

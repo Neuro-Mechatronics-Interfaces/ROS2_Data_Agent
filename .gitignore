@@ -1,3 +1,5 @@
 venv/
 .idea/
 data/
+Performance_Metrics.txt
+__pycache__/

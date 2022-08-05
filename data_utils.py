@@ -138,7 +138,7 @@ class DataAgent:
         self.verbose = verbose
         self.file_list = []
         self.date_list = []
-        self.data = None
+        self._data = None
         self.parser = BagParser()
 
         # These shouldn't need to change
@@ -268,7 +268,7 @@ class DataAgent:
         return parsed_data
         
     def has_data(self):
-        if self.data is not None:
+        if self._data is not None:
             return true
         else:
             return false

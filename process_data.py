@@ -10,7 +10,7 @@
 # This script should go through each day in the ros workspace and do the following:
 #
 # 1) Get all the folders on the local machine that potentially have task data
-# Ex: 'D:\dev\nml_nhp\ros_workspace-testing\data\220601_145454'
+#    Ex: 'D:\dev\nml_nhp\ros_workspace-testing\data\220601_145454'
 #
 # 2) For each folder, see if a file exists AND if the notebook for the animal doesn't already have an entry for that day
 #    i. if it already exists, skip to next file
@@ -18,7 +18,9 @@
 #
 # 3) Read bag file(s) and obtain relevant data
 #
-# 4) Read and save cursor positiondata to a .txt file in the local directory
+# 4) Read and save cursor position data to a .txt file to specified directory
+#
+# 5) Read and save performance metrics to a .txt file to same directory
 """
 
 import sys
@@ -40,6 +42,6 @@ if __name__ == '__main__':
             print("Reading bag files for {}: {}".format(date, files))
             agent.read_files(files=files)  # this step can take a few minutes to an hour...
                        
-            #>>> temp_df = pd.DataFrame(agent._data[0].records) # For everything
-            temp_df = agent.get_topic_data('/cursor/position') # For just cursor position
-            agent.save_cursor_pos(temp_df)
+            agent.save_cursor_pos(date)
+            agent.save_states(date)
+            agent.save_metrics(date)

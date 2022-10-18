@@ -30,6 +30,7 @@
 """
 
 import sys
+import os
 from data_utils import DataAgent
 
 if __name__ == '__main__':
@@ -92,8 +93,20 @@ if __name__ == '__main__':
                 # Choosing not to overwrite existing workbook in order to keep formatting and visual basic viewing options, instead
                 # we will save processed numbers to new worksheet and copy-paste data to original
                 print("Writing values to text file")
-                file_name = "Performance_Metrics.txt"
-                with open(file_name, "a") as f:
-                    f.write(date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(N_failure) + "\n")
-                    #f.write(date + ",N:" + str(6000) + ",Success:" + str(3000) + ",Failure:" + str(3000) + "\n")
-                    f.close()
+                
+                # Want to save to (R)aptor drive for now
+                root_dir = r'R:\NMLShare\generated_data\primate\Cursor_Task\Forrest'
+                folder_path = root_dir + '\\Forrest_' + date.replace('/','_') + '\\'
+            
+                file_name = date.replace('/','_') + '_PERFORMANCE_METRICS.txt'
+                
+                if not os.path.exists(folder_path):
+                    os.makedirs(folder_path)
+                print('Saving metrics data to ' + folder_path)
+
+                try:
+                    with open((folder_path + file_name), "a") as f:
+                        f.write(date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(N_failure) + "\n")
+                        f.close()
+                except:
+                    print('something went wrong')

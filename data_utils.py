@@ -14,6 +14,22 @@ import pandas as pd
 import numpy as np
 from nml_bag.reader import Reader
 
+def save_as(df_file, folder_path, file_name):
+    # Helper function to save files in a new directory
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+        df_file.to_csv((folder_path + file_name))
+        
+        
+def convert_to_utc(t_val):
+    # Helper function to convert ROS2 nanosecond time format to python readable utc time
+    # ex: '1661975258802625400' -> 1661975258.802625
+    if not isinstance(t_val, str):
+        t_val = str(t_val)
+    
+    return float(t_val[:10] + '.' + t_val[10:16])
+
+    
 
 class BagParser:
     """ A ROS2 bag file parser that utilizes the nml_bag 'Reader' Class and its ROS2 Bag file wrappers
@@ -109,8 +125,6 @@ class BagParser:
         if return_topics:
             return self.reader_obj[0].topics
 
-
-
     def get_cursor_data(self):
         """ Extract rows matching topic '/cursor/position'.
             Output will be list of dict elements {position, timestamp, datatype, data}
@@ -131,7 +145,7 @@ class DataAgent:
     verbose: (bool) enable/disable verbose output
     """
 
-    def __init__(self, file_type='.db3', verbose=False):
+    def __init__(self, file_type='.db3', verbose=False, root_dir=None, subject=None, **kwargs):
         self.parent_dir = None
         self.file_type = file_type
         self.notebook_headers = None
@@ -140,6 +154,9 @@ class DataAgent:
         self.date_list = []
         self._data = None
         self.parser = BagParser()
+        self.root_dir = root_dir
+        self.subject = subject
+        self.date = []
 
         # These shouldn't need to change
         self.notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records'
@@ -160,6 +177,53 @@ class DataAgent:
             if self.verbose:
                 print('Valid root directory')
             return True
+    
+    def build_path(self, date):
+        date_parts = date.split('/')
+        new_date = '_'.join(date_parts[:2]+['20'+date_parts[2]])
+        folder_path = self.root_dir + '\\' + self.subject + '_' + new_date + '\\'
+        return folder_path, new_date
+        
+    def save_cursor_pos(self, date, file_type='txt'):
+        # Saves the cursor position file in the directory specified as a .txt file by default unless also specified
+                    
+        [folder_path, new_date] = self.build_path(date)
+        file_name = new_date + '_CURSOR_POS.' + file_type
+        
+        print('Saving cursor position data to ' + (folder_path + file_name))
+        df_file = self.get_topic_data('/cursor/position') # For just cursor position
+        save_as(df_file, folder_path, file_name)
+            
+    def save_metrics(self, date, file_type='txt', verbose=False):
+        # Saves the performance metrics of the loaded database in the directory specified as a .txt file by default unless also specified
+        
+        [folder_path, new_date] = self.build_path(date)
+        file_name = new_date + '_PERFORMANCE_METRICS.' + file_type
+        
+        [N_trials, N_success, N_failure] = self.get_trial_performance()
+        
+        if verbose:
+            print("Total number of trials: {}".format(N_trials))
+            print("Successful trials:      {}".format(N_Success)
+            print("Percentage correct:     {:.2f}".format(str(100*N_success/N_trials)))
+            
+        avg_trial_dur = self.get_mean_trial_time()
+        
+        print('Saving metrics data to ' + (folder_path + file_name))
+        with open((folder_path + file_name), "a") as f:
+            msg = new_date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(N_failure) + ",Success_Rate:" + str(100*N_success/N_trials) + "\n"
+            f.write(msg)
+            f.write('MEAN_TRIAL_T:' + str(avg_trial_dur))
+            f.close()
+            
+    def save_states(self, date, file_type='txt'):
+    
+        [folder_path, new_date] = self.build_path(date)
+        file_name = new_date + '_STATES.' + file_type
+            
+        print('Saving task state events to ' + (folder_path + file_name))
+        df_file = self.get_topic_data('/task/center_out/state') # For just task states
+        save_as(df_file, folder_path, file_name)
 
     def set_notebook_headers(self, args, output=False):
         self.notebook_headers = args.split(',')
@@ -228,7 +292,7 @@ class DataAgent:
 
         return skip
 
-    def parse_str_date_info(self, string):
+    def parse_str_date_info(self, string, year_format=None):
         """ Internal parser function to extract the date from a file name
 
         date_str: (str) output string in a date format of 'm/d/yy' (can be changed if notebook changes)
@@ -269,9 +333,9 @@ class DataAgent:
         
     def has_data(self):
         if self._data is not None:
-            return true
+            return True
         else:
-            return false
+            return False
             
     def read_files(self, files=None):
         self._data = self.parser.read_bag_file(files)
@@ -367,3 +431,23 @@ class DataAgent:
             return n_trials, n_success, n_failure
         else:
             return 0, 0, 0
+
+    def get_mean_trial_time(self, start_state='move_a'):
+        """ Function that finds the average duration of trials from the task state changes
+        
+        """
+        # Not sure if this will be the more accurate way to do it, but here's one version
+        # In loop for length of data
+        # Grab indices of success states from last to first
+        # find index of first occurence of hold_a state. 
+        # Get time difference between states
+        # Find next success state continue
+        # subtract SUCCESS state time with MOVE_A state time
+        
+        # For now we find the time between all hold_a states
+        df_states = self.get_topic_data('/task/center_out/state') # For just task states
+        
+        start_idx = df_states.index[df_states['data'] == start_state].tolist()
+        start_t = [convert_to_utc(i) for i in df_states['time_ns'][start_idx]]
+        mean_total_trial_t = np.mean(np.diff(start_t))
+        return mean_total_trial_t

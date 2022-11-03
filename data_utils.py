@@ -16,10 +16,9 @@ from nml_bag.reader import Reader
 
 def save_as(df_file, folder_path, file_name):
     # Helper function to save files in a new directory
-    os.path.abspath("mydir/myfile.txt")
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
-        df_file.to_csv((folder_path + file_name))
+    df_file.to_csv((folder_path + file_name))
         
         
 def convert_to_utc(t_val):
@@ -93,6 +92,7 @@ class BagParser:
             self.reader_obj = self.read_bag_file(files)
             if self.verbose: print("Reading files completed")
 
+
     def read_bag_file(self, file_path):
         """ Opens the bag file specified by the parameter input.
 
@@ -118,6 +118,7 @@ class BagParser:
 
         return obj
 
+
     def get_bag_topics(self, return_topics=False):
         """ Gets the topics found in the bag files. Defaults to the first bag object in memory, assumes other
          bag files have the same topics. Optio to return list of topics
@@ -125,6 +126,7 @@ class BagParser:
         print("Found topics: \n  " + self.reader_obj[0].topics)
         if return_topics:
             return self.reader_obj[0].topics
+
 
     def get_cursor_data(self):
         """ Extract rows matching topic '/cursor/position'.
@@ -146,21 +148,30 @@ class DataAgent:
     verbose: (bool) enable/disable verbose output
     """
 
-    def __init__(self, file_type='.db3', verbose=False, root_dir=None, subject=None, **kwargs):
-        self.parent_dir = None
+    def __init__(self, file_type='.db3', search_dir=None, raw_data_path=None, gen_data_path=None, subject=None, verbose=False, **kwargs):
         self.file_type = file_type
-        self.notebook_headers = None
+        self.raw_data_path = raw_data_path
+        self.gen_data_path = gen_data_path
+        self.search_dir = search_dir       
+        self.subject = subject
         self.verbose = verbose
         self.file_list = []
         self.date_list = []
-        self._data = None
-        self.parser = BagParser()
-        self.root_dir = root_dir
-        self.subject = subject
         self.date = []
+        self._data = None
+        self.notebook_headers = None
+        self.parser = BagParser()
+
+        if raw_data_path is None:
+            self.raw_data_path = r'R:\NMLShare\raw_data\primate\Forrest' # Want to move the raw data files after processing to (R)aptor drive
+
+        if gen_data_path is None:
+            self.gen_data_path = r'R:\NMLShare\generated_data\primate\Cursor_Task\Forrest' # Want to save generated data files to (R)aptor drive
+
 
         # These shouldn't need to change
         self.notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records'
+
 
     def check_path(self, parent_folder=None):
         """Checks the folder directory as a valid path and looks for bag files in subdirectories
@@ -179,11 +190,16 @@ class DataAgent:
                 print('Valid root directory')
             return True
     
-    def build_path(self, date):
+    
+    def build_path(self, date, year_first=True):
         date_parts = date.split('/')
-        new_date = '_'.join(date_parts[:2]+['20'+date_parts[2]])
-        folder_path = self.root_dir + '\\' + self.subject + '_' + new_date + '\\'
+        if year_first:
+            new_date =  '_'.join(['20'+date_parts[2]] + date_parts[:2])
+        else:
+            new_date = '_'.join(date_parts[:2]+['20'+date_parts[2]])
+        folder_path = self.gen_data_path + '\\' + self.subject + '_' + new_date + '\\'
         return folder_path, new_date
+        
         
     def save_cursor_pos(self, date, file_type='txt'):
         # Saves the cursor position file in the directory specified as a .txt file by default unless also specified
@@ -191,18 +207,49 @@ class DataAgent:
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_CURSOR_POS.' + file_type
         
-        print('Saving cursor position data to ' + (folder_path + file_name))
+        print('\n=== Grabbing cursor position data ===\n')
         df_file = self.get_topic_data('/cursor/position') # For just cursor position
-        save_as(df_file, folder_path, file_name)
+        if self.verbose:
+            print('Saving cursor position data to:\n ' + (folder_path + file_name))
             
+        save_as(df_file, folder_path, file_name)
+        if self.verbose: print("Done")
+            
+            
+    def save_states(self, date, file_type='txt'):
+    
+        [folder_path, new_date] = self.build_path(date)            
+        file_name = new_date + '_STATES.' + file_type
+        print('\n=== Grabbing states ===\n')
+        df_file = self.get_topic_data('/task/center_out/state') # For just task states
+        if self.verbose:
+            print('Saving task state events to:\n ' + (folder_path + file_name))
+        
+        save_as(df_file, folder_path, file_name)
+        if self.verbose: print("Done")
+
+
+    def save_targets(self, date, file_type='txt'):
+    
+        [folder_path, new_date] = self.build_path(date)            
+        file_name = new_date + '_TARGETS.' + file_type
+        print('\n=== Grabbing targets ===\n')
+        df_file = self.get_topic_data('/target/position') # For just task states
+        if self.verbose:
+            print('Saving target position data to:\n ' + (folder_path + file_name))
+    
+        save_as(df_file, folder_path, file_name)
+        if self.verbose: print("Done")
+
+
     def save_metrics(self, date, file_type='txt', verbose=False):
         # Saves the performance metrics of the loaded database in the directory specified as a .txt file by default unless also specified
         
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_PERFORMANCE_METRICS.' + file_type
-        
-        [N_trials, N_success, N_failure] = self.get_trial_performance()
-        
+
+        print('\n=== Grabbing states ===\n')        
+        [N_trials, N_success, N_failure] = self.get_trial_performance()        
         if verbose:
             print("Total number of trials: {}".format(N_trials))
             print("Successful trials:      {}".format(N_Success))
@@ -216,16 +263,35 @@ class DataAgent:
             f.write(msg)
             f.write('MEAN_TRIAL_T:' + str(avg_trial_dur))
             f.close()
+        if self.verbose: print("Done")
             
-    def save_states(self, date, file_type='txt'):
-    
-        [folder_path, new_date] = self.build_path(date)
-        file_name = new_date + '_STATES.' + file_type
             
-        print('Saving task state events to ' + (folder_path + file_name))
-        df_file = self.get_topic_data('/task/center_out/state') # For just task states
-        save_as(df_file, folder_path, file_name)
+    def save_all_data(self, date, file_type='txt'):
+        try:
+            print('\n=== Grabbing all data ===\n')
+            [folder_path, new_date] = self.build_path(date)          
+            file_name = new_date + '_DATA.' + file_type
 
+            for reader in self._data:
+                print(reader)
+                print(reader.records)
+                df_file = pd.DataFrame(reader.records)
+                if self.verbose:
+                    print('Saving data to:\n  ' + (folder_path + file_name))
+            
+                save_as(df_file, folder_path, file_name)
+        except:
+            print("Something went wrong with saving the data... Please investigate")
+            
+            
+
+    def move_raw_data(self):
+        # Function that moves the files found in the searching directory to the raw data directory, if specified
+        if self.raw_data_path is not None and self.search_dir is not None:
+            for x in os.walk(self.search_dir):
+                shutil.move(self.search_dir + x[0], self.raw_data_path, copy_function = shutil.copytree)
+                
+                
     def set_notebook_headers(self, args, output=False):
         self.notebook_headers = args.split(',')
         if self.verbose:
@@ -237,6 +303,7 @@ class DataAgent:
             print("No notebook data columns specified...")
         if output:
             return self.notebook_headers
+
 
     def get_notebook_data(self, animal, use_dataframe=True):
         """ Access the notebook training data from the NML_NHP shared drive for the animal specified
@@ -259,6 +326,7 @@ class DataAgent:
 
         return d
 
+
     def update_notebook(self, nb_df, date_str, data):
         """ Updates the dataframe with the new data specified by the date and header name
         """
@@ -268,6 +336,7 @@ class DataAgent:
             nb_df.loc[date_idx, header] = data[header]  # replace date,header index with new value
 
         return nb_df
+
 
     def check_notebook_entry(self, table, date_str, headers, overwrite=False):
         """ Check which headers are empty for new date entry, if not then skip
@@ -293,6 +362,7 @@ class DataAgent:
 
         return skip
 
+
     def parse_str_date_info(self, string, year_format=None):
         """ Internal parser function to extract the date from a file name
 
@@ -305,6 +375,7 @@ class DataAgent:
         info_str = str(mm) + "/" + str(dd) + "/" + str(yy)
 
         return info_str, temp.group()
+
 
     def parse_files(self, data):
         """"""
@@ -332,14 +403,17 @@ class DataAgent:
         print("Sorted files with most consecutive keys")
         return parsed_data
         
+        
     def has_data(self):
         if self._data is not None:
             return True
         else:
             return False
             
+            
     def read_files(self, files=None):
         self._data = self.parser.read_bag_file(files)
+        
         
     def get_files(self, file_path=None, file_type=None):
         """ Recursively goes through each folder and returns a dict with the file names for each day.
@@ -347,7 +421,10 @@ class DataAgent:
         """
         
         if file_path is not None and type(file_path)==str:
-            self.parent_dir = file_path
+            if self.check_path(file_path):
+                self.parent_dir = file_path
+            else:
+                return
         if file_type is not None and type(file_type)==str:
             self.file_type = file_type
 
@@ -377,6 +454,7 @@ class DataAgent:
         filtered_data = self.parse_files(data)
 
         return filtered_data
+        
         
     def get_topic_data(self, topic, options=None):
         """
@@ -432,6 +510,7 @@ class DataAgent:
             return n_trials, n_success, n_failure
         else:
             return 0, 0, 0
+
 
     def get_mean_trial_time(self, start_state='move_a'):
         """ Function that finds the average duration of trials from the task state changes

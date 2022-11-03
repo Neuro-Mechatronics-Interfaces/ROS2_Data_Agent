@@ -31,11 +31,11 @@ from data_utils import DataAgent
 
 if __name__ == '__main__':
 
-    root_path = r'R:\NMLShare\generated_data\primate\Cursor_Task\Forrest' # Want to save to (R)aptor drive for now
-    agent = DataAgent(root_dir=root_path, subject='Forrest')
+    search_dir = r'D:\dev\nml_nhp\ros_workspace-testing\data\awaiting_process'
+    agent = DataAgent(search_dir=search_dir, subject='Forrest', verbose=True)
 
     # Check that the directory is valid, continue if so. DataAgent object saves file path
-    if agent.check_path(sys.argv[1]):
+    if agent.check_path(search_dir):
         bag_file_list = agent.get_files()
         
         for date, files in bag_file_list.items():
@@ -43,5 +43,6 @@ if __name__ == '__main__':
             agent.read_files(files=files)  # this step can take a few minutes to an hour...
                        
             agent.save_cursor_pos(date)
+            agent.save_targets(date)
             agent.save_states(date)
             agent.save_metrics(date)

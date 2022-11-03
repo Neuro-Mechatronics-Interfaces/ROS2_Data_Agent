@@ -16,6 +16,7 @@ from nml_bag.reader import Reader
 
 def save_as(df_file, folder_path, file_name):
     # Helper function to save files in a new directory
+    os.path.abspath("mydir/myfile.txt")
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
         df_file.to_csv((folder_path + file_name))
@@ -204,7 +205,7 @@ class DataAgent:
         
         if verbose:
             print("Total number of trials: {}".format(N_trials))
-            print("Successful trials:      {}".format(N_Success)
+            print("Successful trials:      {}".format(N_Success))
             print("Percentage correct:     {:.2f}".format(str(100*N_success/N_trials)))
             
         avg_trial_dur = self.get_mean_trial_time()

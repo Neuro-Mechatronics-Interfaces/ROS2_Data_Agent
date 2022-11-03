@@ -40,6 +40,11 @@ if __name__ == '__main__':
             print("Reading bag files for {}: {}".format(date, files))
             agent.read_files(files=files)  # this step can take a few minutes to an hour...
                        
+            # You can get all the topics saved to the bag file with >>> agent._data[0].topics
             #>>> temp_df = pd.DataFrame(agent._data[0].records) # For everything
             temp_df = agent.get_topic_data('/cursor/position') # For just cursor position
             agent.save_cursor_pos(temp_df)
+
+            # If you want to save to a specific directory, use the 'saveas' method
+            
+            #save_as(df_file, path_to_save, file_name)

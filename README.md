@@ -9,7 +9,12 @@ Code for a multipurpose file explorer specializing in reading ROS2 topic data fr
 - Python 3.8 with packages pandas, numpy, openpyxl (Use the package manager [pip](https://pip.pypa.io/en/stable/) to install).
 
 ```bash
-pip install pandas numpy openpyxl
+pip install pandas numpy openpyxl bag
+```
+- The `nml_bag` package from Andrew Whitmore for reading bag files created from ROS2. Clone the repository and run the installatiion file.
+```bash
+git clone https://github.com/ricmua/nml_bag.git
+pip install /path/to/nml_bag
 ```
 
 ### Usage ###

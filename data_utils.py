@@ -148,10 +148,11 @@ class DataAgent:
     verbose: (bool) enable/disable verbose output
     """
 
-    def __init__(self, file_type='.db3', search_dir=None, raw_data_path=None, gen_data_path=None, subject=None, verbose=False, **kwargs):
+    def __init__(self, file_type='.db3', search_dir=None, subject=None, verbose=False, raw_data_path=None, gen_data_path=None, param_path=None, **kwargs):
         self.file_type = file_type
         self.raw_data_path = raw_data_path
         self.gen_data_path = gen_data_path
+        self.param_path = param_path
         self.search_dir = search_dir       
         self.subject = subject
         self.verbose = verbose
@@ -173,19 +174,19 @@ class DataAgent:
         self.notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records'
 
 
-    def check_path(self, parent_folder=None):
+    def check_path(self, data_path=None):
         """Checks the folder directory as a valid path and looks for bag files in subdirectories
         """
-        if parent_folder is None:
-            parent_folder = input("Please enter the parent folder directory: ")
+        if data_path is None:
+            data_path = input("Please enter the parent folder directory: ")
 
         # check that the parent directory is the one desired
-        if not os.path.isdir(parent_folder):
-            print("Error - path not valid: {}".format(parent_folder))
+        if not os.path.isdir(data_path):
+            print("Error - path not valid: {}".format(data_path))
             return False
         else:
             # Saves directory to object (might be useful)
-            self.parent_dir = parent_folder
+            self.search_dir = data_path
             if self.verbose:
                 print('Valid root directory')
             return True
@@ -199,6 +200,11 @@ class DataAgent:
             new_date = '_'.join(date_parts[:2]+['20'+date_parts[2]])
         folder_path = self.gen_data_path + '\\' + self.subject + '_' + new_date + '\\'
         return folder_path, new_date
+        
+    def add_param_path(self, param_path=None):
+        # Adds a search directory for parameters saved in config files
+        if  os.path.isdir(param_path):
+            self.param_path = param_path
         
         
     def save_cursor_pos(self, date, file_type='txt'):
@@ -242,7 +248,7 @@ class DataAgent:
         if self.verbose: print("Done")
 
 
-    def save_metrics(self, date, file_type='txt', verbose=False):
+    def save_metrics(self, date, file_type='txt', verbose=False, get_metrics=False):
         # Saves the performance metrics of the loaded database in the directory specified as a .txt file by default unless also specified
         
         [folder_path, new_date] = self.build_path(date)
@@ -259,11 +265,23 @@ class DataAgent:
         
         print('Saving metrics data to ' + (folder_path + file_name))
         with open((folder_path + file_name), "a") as f:
+            # ================= Add all the metadata information you want to save here ===============
             msg = new_date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(N_failure) + ",Success_Rate:" + str(100*N_success/N_trials) + "\n"
             f.write(msg)
             f.write('MEAN_TRIAL_T:' + str(avg_trial_dur))
+            
+            if self.param_path:
+                f.write('N_TARGETS:' + self.get_param_from_file(self.param_path, 'n_targets'))
+                f.write('TARGET_RADIUS:' + self.get_param_from_file(self.param_path, ['target_0','radius']))
+                f.write('CURSOR_RADIUS:' + self.get_param_from_file(self.param_path, ['cursor','radius']))
+                f.write('ENFORCE_ORIENTATION:' + self.get_param_from_file(self.param_path, 'enforce_orientation'))
+            # ========================================================================================
             f.close()
         if self.verbose: print("Done")
+        # If we desire the metrics information on the terminal screen after processing...
+        if get_metrics:
+            print("Daily performance metrics:\n")
+            print(msg)
             
             
     def save_all_data(self, date, file_type='txt'):
@@ -290,6 +308,7 @@ class DataAgent:
         if self.raw_data_path is not None and self.search_dir is not None:
             for x in os.walk(self.search_dir):
                 shutil.move(self.search_dir + x[0], self.raw_data_path, copy_function = shutil.copytree)
+                
                 
                 
     def set_notebook_headers(self, args, output=False):
@@ -413,7 +432,58 @@ class DataAgent:
             
     def read_files(self, files=None):
         self._data = self.parser.read_bag_file(files)
+
+
+    def get_param_from_file(self, param_path=None, param_name=None):
+        """ Checks directory for config files in .yaml format, searches for the specified parameter 
+            and returns an associated value
         
+            Parameters
+            ----------
+            param_path : (str) directory for config files
+            param_name : (str/list) Can be a single string or list of strings indicating the parameter
+                                    name (and subfields) to search for
+            Return
+            ---------
+            param_val : (str) value associated with the parameter
+
+        """
+        
+        if param_name is None:
+            print("Please pass parameter name to search for")
+            return
+        
+        if param_path is not None and type(param_path)==str:
+            if os.path.isdir(param_path):
+                self.param_dir = param_path
+            else:
+                return
+
+        if not type(param_name) == list:
+            param_name = [param_name] # Enforce being in a list for building regex search expression
+        
+        param_val = None
+        file_list = glob.glob(self.param_dir + "*/*")
+        if self.verbose: 
+            print("Found files: \n")
+            [print("{}".format(ff)) for ff in file_list]
+            
+        for file in file_list:
+            with open(file, encoding = 'utf-8') as f:
+                text_output = f.read()
+                temp = [p + r':\s+' for p in param_name]
+                str_exp = "(" + ''.join(temp) + ")([\S]*)"
+                match = re.findall(str_exp, text_output)
+                if match:
+                    if self.verbose: print("Found parameter sequence '{}' in file '{}'. Getting value...".format(param_name, file))
+                    param_val = match[0][1]
+                    return param_val
+                else:
+                     if self.verbose: print("Could not find parameter '{}' in file '{}'".format(param_name, file))
+                    
+        if param_val is None:
+            print("Could not find parameter '{}' in directory {}'".format(param_name, param_path))
+  
         
     def get_files(self, file_path=None, file_type=None):
         """ Recursively goes through each folder and returns a dict with the file names for each day.
@@ -422,17 +492,17 @@ class DataAgent:
         
         if file_path is not None and type(file_path)==str:
             if self.check_path(file_path):
-                self.parent_dir = file_path
+                self.search_dir = file_path
             else:
                 return
         if file_type is not None and type(file_type)==str:
             self.file_type = file_type
 
         print("Searching for files...")
-        self.file_list = glob.glob(self.parent_dir + "/**/*" + self.file_type, recursive=True)
+        self.file_list = glob.glob(self.search_dir + "/**/*" + self.file_type, recursive=True)
         print("Found {} files with file type '{}'".format(len(self.file_list), self.file_type))
         if self.verbose:
-            print("Files found in '{}' matching '{}' file type:".format(self.parent_dir, self.file_type))
+            print("Files found in '{}' matching '{}' file type:".format(self.search_dir, self.file_type))
             for item in self.file_list:
                 print("\t" + item)
 

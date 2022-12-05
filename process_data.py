@@ -33,6 +33,10 @@ if __name__ == '__main__':
 
     search_dir = r'D:\dev\nml_nhp\ros_workspace-testing\data\awaiting_process'
     agent = DataAgent(search_dir=search_dir, subject='Forrest', verbose=True)
+    
+    # Pass directory to where .yaml files are for use with metadata collection
+    config_dir = r'D:\dev\nml_nhp\ros_workspace-testing\config'
+    agent.add_param_path(config_dir)
 
     # Check that the directory is valid, continue if so. DataAgent object saves file path
     if agent.check_path(search_dir):
@@ -45,4 +49,4 @@ if __name__ == '__main__':
             agent.save_cursor_pos(date)
             agent.save_targets(date)
             agent.save_states(date)
-            agent.save_metrics(date)
+            agent.save_metrics(date, get_metrics=True)

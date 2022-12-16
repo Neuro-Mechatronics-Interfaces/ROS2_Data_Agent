@@ -213,7 +213,7 @@ class DataAgent:
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_CURSOR_POS.' + file_type
         
-        print('\n=== Grabbing cursor position data ===\n')
+        print('Grabbing cursor position data...\n')
         df_file = self.get_topic_data('/cursor/position') # For just cursor position
         if self.verbose:
             print('Saving cursor position data to:\n ' + (folder_path + file_name))
@@ -226,7 +226,7 @@ class DataAgent:
     
         [folder_path, new_date] = self.build_path(date)            
         file_name = new_date + '_STATES.' + file_type
-        print('\n=== Grabbing states ===\n')
+        print('Grabbing states...\n')
         df_file = self.get_topic_data('/task/center_out/state') # For just task states
         if self.verbose:
             print('Saving task state events to:\n ' + (folder_path + file_name))
@@ -239,7 +239,7 @@ class DataAgent:
     
         [folder_path, new_date] = self.build_path(date)            
         file_name = new_date + '_TARGETS.' + file_type
-        print('\n=== Grabbing targets ===\n')
+        print('Grabbing targets...\n')
         df_file = self.get_topic_data('/target/position') # For just task states
         if self.verbose:
             print('Saving target position data to:\n ' + (folder_path + file_name))
@@ -254,7 +254,7 @@ class DataAgent:
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_PERFORMANCE_METRICS.' + file_type
 
-        print('\n=== Grabbing states ===\n')        
+        print('Grabbing performance metrics...\n')        
         [N_trials, N_success, N_failure] = self.get_trial_performance()        
         if verbose:
             print("Total number of trials: {}".format(N_trials))
@@ -268,13 +268,13 @@ class DataAgent:
             # ================= Add all the metadata information you want to save here ===============
             msg = new_date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(N_failure) + ",Success_Rate:" + str(100*N_success/N_trials) + "\n"
             f.write(msg)
-            f.write('MEAN_TRIAL_T:' + str(avg_trial_dur))
+            f.write('MEAN_TRIAL_T:' + str(avg_trial_dur) + "\n")
             
             if self.param_path:
-                f.write('N_TARGETS:' + self.get_param_from_file(self.param_path, 'n_targets'))
-                f.write('TARGET_RADIUS:' + self.get_param_from_file(self.param_path, ['target_0','radius']))
-                f.write('CURSOR_RADIUS:' + self.get_param_from_file(self.param_path, ['cursor','radius']))
-                f.write('ENFORCE_ORIENTATION:' + self.get_param_from_file(self.param_path, 'enforce_orientation'))
+                f.write('N_TARGETS:' + self.get_param_from_file(self.param_path, 'n_targets') + "\n")
+                f.write('TARGET_RADIUS:' + self.get_param_from_file(self.param_path, ['target_0','radius']) + "\n")
+                f.write('CURSOR_RADIUS:' + self.get_param_from_file(self.param_path, ['cursor','radius']) + "\n")
+                f.write('ENFORCE_ORIENTATION:' + self.get_param_from_file(self.param_path, 'enforce_orientation') + "\n")
             # ========================================================================================
             f.close()
         if self.verbose: print("Done")

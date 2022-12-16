@@ -32,7 +32,7 @@ from data_utils import DataAgent
 if __name__ == '__main__':
 
     search_dir = r'D:\dev\nml_nhp\ros_workspace-testing\data\awaiting_process'
-    agent = DataAgent(search_dir=search_dir, subject='Forrest', verbose=True)
+    agent = DataAgent(search_dir=search_dir, subject='Forrest')
     
     # Pass directory to where .yaml files are for use with metadata collection
     config_dir = r'D:\dev\nml_nhp\ros_workspace-testing\config'

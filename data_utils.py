@@ -162,16 +162,13 @@ class DataAgent:
         self._data = None
         self.notebook_headers = None
         self.parser = BagParser()
+        self.notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records'
 
         if raw_data_path is None:
             self.raw_data_path = r'R:\NMLShare\raw_data\primate\Forrest' # Want to move the raw data files after processing to (R)aptor drive
 
         if gen_data_path is None:
             self.gen_data_path = r'R:\NMLShare\generated_data\primate\Cursor_Task\Forrest' # Want to save generated data files to (R)aptor drive
-
-
-        # These shouldn't need to change
-        self.notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records'
 
 
     def check_path(self, data_path=None):
@@ -195,10 +192,12 @@ class DataAgent:
     def build_path(self, date, year_first=True):
         date_parts = date.split('/')
         if year_first:
-            new_date =  '_'.join(['20'+date_parts[2]] + date_parts[:2])
+            new_date = '20' + date_parts[2] + '_' + date_parts[0].zfill(2) + '_' + date_parts[1].zfill(2)
+            #new_date =  '_'.join(['20'+date_parts[2]] + date_parts[:2])
         else:
-            new_date = '_'.join(date_parts[:2]+['20'+date_parts[2]])
-        folder_path = self.gen_data_path + '\\' + self.subject + '_' + new_date + '\\'
+            new_date = date_parts[0].zfill(2) + '_' + date_parts[1].zfill(2)  + '_' +'20' + date_parts[2] 
+            #new_date = '_'.join(date_parts[:2]+['20'+date_parts[2]])
+        folder_path = self.gen_data_path + '\\' + self.subject + '\\' + self.subject + '_' + new_date + '\\'
         return folder_path, new_date
         
     def add_param_path(self, param_path=None):
@@ -207,83 +206,95 @@ class DataAgent:
             self.param_path = param_path
         
         
-    def save_cursor_pos(self, date, file_type='txt'):
-        # Saves the cursor position file in the directory specified as a .txt file by default unless also specified
-                    
+    def get_cursor_pos(self, date, file_type='txt', save=False):
+        # Saves the cursor position file in the directory specified as a .txt file by default unless also specified                   
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_CURSOR_POS.' + file_type
         
         print('Grabbing cursor position data...\n')
         df_file = self.get_topic_data('/cursor/position') # For just cursor position
+
         if self.verbose:
-            print('Saving cursor position data to:\n ' + (folder_path + file_name))
-            
-        save_as(df_file, folder_path, file_name)
-        if self.verbose: print("Done")
-            
-            
-    def save_states(self, date, file_type='txt'):
+            print(df_file)
+
+        if save:
+            print('Saving cursor position data to:\n ' + (folder_path + file_name))            
+            save_as(df_file, folder_path, file_name)
+            print("Done")
+
+
+    def get_states(self, date, file_type='txt', save=False):
     
         [folder_path, new_date] = self.build_path(date)            
         file_name = new_date + '_STATES.' + file_type
         print('Grabbing states...\n')
         df_file = self.get_topic_data('/task/center_out/state') # For just task states
-        if self.verbose:
-            print('Saving task state events to:\n ' + (folder_path + file_name))
         
-        save_as(df_file, folder_path, file_name)
-        if self.verbose: print("Done")
+        if self.verbose:
+            print(df_file)
+            
+        if save:
+            print('Saving task state events to:\n ' + (folder_path + file_name))        
+            save_as(df_file, folder_path, file_name)
+            print("Done")
 
 
-    def save_targets(self, date, file_type='txt'):
+    def get_targets(self, date, file_type='txt', save=False):
     
         [folder_path, new_date] = self.build_path(date)            
         file_name = new_date + '_TARGETS.' + file_type
         print('Grabbing targets...\n')
         df_file = self.get_topic_data('/target/position') # For just task states
+
         if self.verbose:
-            print('Saving target position data to:\n ' + (folder_path + file_name))
-    
-        save_as(df_file, folder_path, file_name)
-        if self.verbose: print("Done")
+            print(df_file)
+            
+        if save:
+            print('Saving target position data to:\n ' + (folder_path + file_name))    
+            save_as(df_file, folder_path, file_name)
+            print("Done")
 
 
-    def save_metrics(self, date, file_type='txt', verbose=False, get_metrics=False):
+    def get_metrics(self, date, file_type='txt', verbose=False, save=False):
         # Saves the performance metrics of the loaded database in the directory specified as a .txt file by default unless also specified
         
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_PERFORMANCE_METRICS.' + file_type
 
         print('Grabbing performance metrics...\n')        
-        [N_trials, N_success, N_failure] = self.get_trial_performance()        
+        [N_trials, N_success, N_failure] = self.get_trial_performance()
+        if self.param_path:
+            msg_target_n = 'N_TARGETS:' + self.get_param_from_file(self.param_path, 'n_targets') + "\n"
+            msg_target_r = 'TARGET_RADIUS:' + self.get_param_from_file(self.param_path, ['target_0','radius']) + "\n"
+            msg_cursor_r = 'CURSOR_RADIUS:' + self.get_param_from_file(self.param_path, ['cursor','radius']) + "\n"
+            msg_enforce_orient = 'ENFORCE_ORIENTATION:' + self.get_param_from_file(self.param_path, 'enforce_orientation') + "\n"
+            msg_trial_t_avg = 'MEAN_TRIAL_T:' + str(self.get_mean_trial_time()) + "\n"
+
         if verbose:
+            print("[{}] Performance metrics:\n\n".format(new_date))
             print("Total number of trials: {}".format(N_trials))
-            print("Successful trials:      {}".format(N_Success))
-            print("Percentage correct:     {:.2f}".format(str(100*N_success/N_trials)))
-            
-        avg_trial_dur = self.get_mean_trial_time()
-        
-        print('Saving metrics data to ' + (folder_path + file_name))
-        with open((folder_path + file_name), "a") as f:
-            # ================= Add all the metadata information you want to save here ===============
-            msg = new_date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(N_failure) + ",Success_Rate:" + str(100*N_success/N_trials) + "\n"
-            f.write(msg)
-            f.write('MEAN_TRIAL_T:' + str(avg_trial_dur) + "\n")
-            
-            if self.param_path:
-                f.write('N_TARGETS:' + self.get_param_from_file(self.param_path, 'n_targets') + "\n")
-                f.write('TARGET_RADIUS:' + self.get_param_from_file(self.param_path, ['target_0','radius']) + "\n")
-                f.write('CURSOR_RADIUS:' + self.get_param_from_file(self.param_path, ['cursor','radius']) + "\n")
-                f.write('ENFORCE_ORIENTATION:' + self.get_param_from_file(self.param_path, 'enforce_orientation') + "\n")
-            # ========================================================================================
-            f.close()
-        if self.verbose: print("Done")
-        # If we desire the metrics information on the terminal screen after processing...
-        if get_metrics:
-            print("Daily performance metrics:\n")
-            print(msg)
-            
-            
+            print("Correct trials:         {}".format(N_success))
+            print("Percentage correct:     {:.1f}".format(100*N_success/N_trials))
+
+        if save:
+            print('Saving metrics data to ' + (folder_path + file_name))
+            with open((folder_path + file_name), "a") as f:
+                # ================= Add all the metadata information you want to save here ===============
+                msg = new_date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(N_failure) + ",Success_Rate:" + str(100*N_success/N_trials) + "\n"
+                f.write(msg)
+                f.write(msg_trial_t_avg)
+
+                if self.param_path:
+                    f.write(msg_target_n)
+                    f.write(msg_target_r)
+                    f.write(msg_cursor_r)
+                    f.write(msg_enforce_orient)
+                # ========================================================================================
+                f.close()
+
+            print("Done")
+
+
     def save_all_data(self, date, file_type='txt'):
         try:
             print('\n=== Grabbing all data ===\n')

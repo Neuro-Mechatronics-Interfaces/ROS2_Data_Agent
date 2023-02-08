@@ -1,6 +1,5 @@
 venv/
 .idea/
 data/
-Performance_Metrics.txt
 __pycache__/
 nml_bag/__pycache__/

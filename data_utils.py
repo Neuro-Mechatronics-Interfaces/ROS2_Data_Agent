@@ -254,6 +254,27 @@ class DataAgent:
             save_as(df_file, folder_path, file_name)
             print("Done")
 
+    def get_forces(self, date, file_type='txt', save=False):
+        # Function that grabs the force transformation data for the robot and the cursor from a 
+        # loaded bag file and stores it to a local file (.txt by default)
+        [folder_path, new_date] = self.build_path(date)
+        file_name_1 = new_date + '_FORCE_ROBOT_FEEDBACK.' + file_type
+        file_name_2 = new_date + '_FORCE_ROBOT_COMMAND.' + file_type
+        file_name_3 = new_date + '_FORCE_CURSOR.' + file_type
+        print('Grabbing force data...\n')
+        f_robot_df_file = self.get_topic_data('/robot/feedback/force') # Force feedback data from the robot
+        f_cmd_df_file = self.get_topic_data('/robot/command/force') # Force commands sent to the robot
+        f_cursor_df_file = self.get_topic_data('/cursor/force') # Cursor force feedback
+
+        if self.verbose:
+            print(f_robot_df_file)
+            
+        if save:
+            print('Saving force data to:\n ' + (folder_path + new_date + '_FORCE_* custom topic extension:\n  "ROBOT_FEEDBACK"\n  "ROBOT_COMMAND"\n  "CURSOR\n")' ))    
+            save_as(f_robot_df_file, folder_path, file_name_1)
+            save_as(f_cmd_df_file, folder_path, file_name_2)
+            save_as(f_cursor_df_file, folder_path, file_name_3)
+            print("Done")
 
     def get_metrics(self, date, file_type='txt', verbose=False, save=False):
         # Saves the performance metrics of the loaded database in the directory specified as a .txt file by default unless also specified

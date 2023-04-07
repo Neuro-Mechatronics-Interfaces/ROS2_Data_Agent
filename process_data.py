@@ -28,12 +28,13 @@ import os
 import pandas as pd
 from data_utils import DataAgent
 
-save = False # until Raptor is back online
+save = True # Enable if Raptor is online
 
 if __name__ == '__main__':
 
     search_dir = r'D:\dev\nml_nhp\ros_workspace-testing\data\awaiting_process'
-    save_path = r'D:\dev\nml_nhp\ros_workspace-testing\data\Cursor_Task'
+    #save_path = r'D:\dev\nml_nhp\ros_workspace-testing\data\Cursor_Task'
+    save_path = r'R:\NMLShare\generated_data\primate\Cursor_Task'
     agent = DataAgent(search_dir=search_dir, subject='Forrest', gen_data_path=save_path)
     
     # Pass directory to where .yaml files are for use with metadata collection
@@ -48,6 +49,7 @@ if __name__ == '__main__':
             print("Reading bag files for {}: {}".format(date, files))
             agent.read_files(files=files)  # this step can take a few minutes to an hour...
                        
+            agent.get_forces(date, save=save)
             agent.get_cursor_pos(date, save=save)
             agent.get_targets(date, save=save)
             agent.get_states(date, save=save)

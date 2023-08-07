@@ -1,23 +1,21 @@
-"""
-Functionality related to reading ROS2 bag files containing NML experimental 
-data.
+""" Functionality for reading ROS2 bag files.
 
-
-ROS2 facilitates data recording and playback via bag_ files. By default_, the 
-ROS2 bag mechanism uses the sqlite_ 3 storage format, and the Common Data 
-Representation (CDR_) serialization format. This package provides functionality 
-for extracting and translating data stored in bag files.
-
-Note: Although the sqlite3_ package is part of the standard distribution of 
-Python 3 -- and it can be used to interpret bag files -- it is recommended that 
-the ROS2 API be used for decoding bag files wherever possible.
+ROS2 facilitates data recording and playback via bag_ files. This package 
+provides functionality for extracting data stored in bag files, and translating 
+it into Python builtin data types.
 
 .. _bag: https://docs.ros.org/en/galactic/Tutorials/Ros2bag
          /Recording-And-Playing-Back-Data.html)
-.. _default: https://github.com/ros2/rosbag2#storage-format-plugin-architecture
-.. _sqlite: https://en.wikipedia.org/wiki/SQLite
-.. _CDR: https://en.wikipedia.org/wiki/Common_Data_Representation
+
+Notes
+-----
+
+Although the sqlite3_ package is part of the standard distribution of 
+Python 3 -- and it can be used to directly read from bag files -- it is 
+recommended that the ROS2 API be used for decoding bag files wherever possible.
+
 .. _sqlite3: https://docs.python.org/3/library/sqlite3.html
+
 """
 
 # Copyright 2022 Carnegie Mellon University Neuromechatronics Lab
@@ -28,6 +26,10 @@ the ROS2 API be used for decoding bag files wherever possible.
 
 # Contact: a.whit (nml@whit.contact)
 
+
+# Import collection interfaces.
+from collections.abc import Iterator
+from collections.abc import Sequence
 
 # Import ROS2 functionality for reading from bag files.
 from rosbag2_py import StorageOptions
@@ -42,9 +44,10 @@ from nml_bag import message as message_manipulation
 
 #
 class Reader(SequentialReader):
-    """ A ROS2 bag sequential reader class tailored to NML experimental data.
+    """ A ROS2 bag sequential reader class with an iterator interface that 
+        automatically converts messages to standard Python builtin data types.
     
-    Subclass of SequentialReader_ from the ros2bag_ package.
+    Subclass of SequentialReader_, from the ros2bag_ package.
     
     .. _SequentialReader: https://github.com/ros2/rosbag2/blob/master
                           /rosbag2_cpp/src/rosbag2_cpp/readers
@@ -62,6 +65,8 @@ class Reader(SequentialReader):
     filepath : str
         Bag file path to open. If not specified, then the :py:func`open` 
         function must be invoked before accessing any other class functionality.
+    topics : list of strings
+        A list of topics to read. Other topics will be excluded.
     *kargs : dict
         Keyword arguments passed to superclass constructor_.
         
@@ -76,10 +81,16 @@ class Reader(SequentialReader):
     not yet been implemented_. Until this is implemented, we recommend opening 
     a new :py:class`Reader` each time the position is to be reset.
     
+    .. todo: Consider deriving this class from Iterator_ of the 
+             `collections.abc` package. Multiple inheritence and the ABC 
+             metaclass will conflict, so perhaps it should be distinct.
+    
     .. _implemented: https://github.com/ros2/rosbag2/blob
                      /fada54cc2c93d4238f3971e9ce6ea0006ac85c8c/rosbag2_cpp
                      /src/rosbag2_cpp/readers/sequential_reader.cpp#L198
-    
+    .. _Iterator: https://docs.python.org/3/library
+                  /collections.abc.html#collections-abstract-base-classes
+
     Examples
     --------
     This example writes_ a sample bag file in a temporary directory, and then 
@@ -113,7 +124,7 @@ class Reader(SequentialReader):
     >>> writer.write('test_topic', 
     ...              serialize_message(message), 
     ...              clock.now().nanoseconds)
-    >>> reader = Reader(f'{bag_path}{sep}bag_test_0.db3')
+    >>> reader = Reader(f'{bag_path}{sep}bag_test_0.db3', storage_id='sqlite3', serialization_format='cdr')
     >>> reader.topics
     ['test_topic']
     >>> reader.type_map
@@ -128,18 +139,38 @@ class Reader(SequentialReader):
                 #write-the-python-node
     """
     
-    def __init__(self, filepath=None, **kwargs):
-        """
-        """
-        super().__init__(**kwargs)
-        if filepath: self.open(filepath)
+    def __init__(self, filepath=None, topics=[], storage_id='sqlite3', serialization_format='cdr', **kwargs):
+        super().__init__(**kwargs) # SequentialReader
+        if filepath: self.open(filepath, storage_id=storage_id, serialization_format=serialization_format)
+        if topics: self.set_filter(topics)
         
-    def open(self, filepath):
+    def open(self, filepath, storage_id='sqlite3', serialization_format='cdr'):
+        """ Open a bag file.
+        
+        Parameters
+        ----------
+        filepath : str
+            Filesystem path to the bag file to open.
+        storage_id: str
+            The storage plugin to use. See the ROS2 bag documentation for more information.
+        serialization_format: str
+            The serialization format to use. See the ROS2 bag documentation for more information.
+        
+        Notes
+        -----
+        
+        By default_, the ROS2 bag mechanism uses the sqlite_ 3 storage format, 
+        and the Common Data Representation (CDR_) serialization format.
+        
+        .. _default: https://github.com/ros2
+                     /rosbag2#storage-format-plugin-architecture
+        .. _sqlite: https://en.wikipedia.org/wiki/SQLite
+        .. _CDR: https://en.wikipedia.org/wiki/Common_Data_Representation
+
         """
-        """
-        storage_options = StorageOptions(uri=filepath, storage_id='sqlite3')
-        converter_options = ConverterOptions(input_serialization_format='cdr',
-                                             output_serialization_format='cdr')
+        storage_options = StorageOptions(uri=filepath, storage_id=storage_id)
+        converter_options = ConverterOptions(input_serialization_format=serialization_format,
+                                             output_serialization_format=serialization_format)
         super().open(storage_options, converter_options)
         #self._records = list(self)
         
@@ -157,7 +188,7 @@ class Reader(SequentialReader):
         """ A dict that maps ROS2 topic names to message types, for all 
             topics recorded in the open bag file.
         
-        Message types are specified as strings
+        Message types are specified as strings.
         
         See ROS2 background_ documentation for further explanation of nodes and 
         messages.
@@ -170,20 +201,49 @@ class Reader(SequentialReader):
         
     @property
     def records(self):
-        """
+        """ A list of all messages (after filtering), in records format.
+        
+        Each element of the list is a dict mapping between a message field 
+        name and the value provided by the message.
+        
+        Notes
+        -----
+        Practice caution, as accessing this property will read all available 
+        messages into an expanded records format. This is **not** a 
+        memory-efficient format. For large bag files, the memory burden can 
+        cause issues. This is especially true if no message filters are set.
         """
         if not getattr(self, '_records', None): self._records = list(self)
         return self._records
     
-    def set_filter(topics):
-        """
+    def set_filter(self, topics):
+        """ Set the topic filter.
+        
+        Parameters
+        ----------
+        topics : list of strings
+            A list of the topics to include.
         """
         super().set_filter(StorageFilter(topics))
         
+    # __iter__ should be implemented by collections.abc.Iterator.
     def __iter__(self): return self
     
     def __next__(self):
-        """
+        """ Return the next_ message, in record format.
+        
+        .. _next: https://docs.python.org/3/library
+                   /stdtypes.html#iterator.__next__
+        
+        Returns
+        -------
+        record : dict
+            A dict mapping with keys that match the fields 
+            specified in the message definition, along with the following:
+            
+            * `topic`: The ROS topic (string) the message was received on.
+            * `time_ns`: The message timestamp in nanoseconds.
+            * `type`: The ROS message type.
         """
         if not self.has_next(): raise StopIteration()
         
@@ -194,13 +254,13 @@ class Reader(SequentialReader):
         message_type = self.type_map[topic]
         data = message_manipulation.to_dict(data, message_type)
         
-        # For simplicity, the reader is assuming that the message does have 
+        # For simplicity, the reader assumes that the message does not contain 
         # fields that conflict with the message metadata.
         assert('topic' not in data)
         assert('time_ns' not in data)
         assert('type' not in data)
         
-        # Structure 
+        # Convert to record format.
         record = {'topic': topic, 'time_ns': time, 'type': message_type, **data}
         
         # Return the result.

@@ -6,9 +6,10 @@
 
 # Contact: Jonathan Shulgach (jshulgac@andrew.cmu.edu)
 
+import re
 import os
 import glob
-import re
+import shutil
 from openpyxl import load_workbook, Workbook
 import pandas as pd
 import numpy as np
@@ -148,29 +149,31 @@ class DataAgent:
     verbose: (bool) enable/disable verbose output
     """
 
-    def __init__(self, file_type='.db3', search_dir=None, subject=None, verbose=False, raw_data_path=None, gen_data_path=None, param_path=None, **kwargs):
+    def __init__(self, 
+                 subject=None, 
+                 search_path=None, 
+                 save_path=None, 
+                 param_path=None, 
+                 file_type='.db3', 
+                 notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records',
+                 verbose=False, 
+                 **kwargs):
         self.file_type = file_type
-        self.raw_data_path = raw_data_path
-        self.gen_data_path = gen_data_path
-        self.param_path = param_path
-        self.search_dir = search_dir       
         self.subject = subject
+        self.search_path = search_path       
+        self.save_path = save_path
+        self.param_path = param_path
+        self.notebook_path = notebook_path
         self.verbose = verbose
+
         self.file_list = []
         self.date_list = []
         self.date = []
         self._data = None
         self.notebook_headers = None
         self.parser = BagParser()
-        self.notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records'
-
-        if raw_data_path is None:
-            self.raw_data_path = r'R:\NMLShare\raw_data\primate\Forrest' # Want to move the raw data files after processing to (R)aptor drive
-
-        if gen_data_path is None:
-            self.gen_data_path = r'R:\NMLShare\generated_data\primate\Cursor_Task\Forrest' # Want to save generated data files to (R)aptor drive
-
-
+        
+        
     def check_path(self, data_path=None):
         """Checks the folder directory as a valid path and looks for bag files in subdirectories
         """
@@ -183,13 +186,37 @@ class DataAgent:
             return False
         else:
             # Saves directory to object (might be useful)
-            self.search_dir = data_path
+            self.search_path = data_path
             if self.verbose:
                 print('Valid root directory')
             return True
     
     
     def build_path(self, date, year_first=True):
+        """ Helper function that creates folder subdirectories based on the date passed into the 
+            proper subject and date-specified folders.
+        
+            Parameters
+            ============
+            date       : (str) String containing a date entry in the format of MM/DD/YY
+            year_first : (bool) Boolean that switches the position of the year in the date entry 
+                                to appear at the beginning instead of the end
+                                
+            Return
+            ============
+            save_folder_path  : (str) The absolute have to the saved data directory including the 
+                             subject and modified date subdirectories
+            new_date          : (str) The passed date with the new string format 
+            
+            
+            Example:
+            ============
+            >> agent = DataAgent('/home/user/documents')
+            >> save_path, new_date = agent.build_path('7/27/23', 'TestUser')
+            >> print(save_path)
+            >> '/home/user/documents/TestUser/TestUser_2023_07_27'
+             
+        """
         date_parts = date.split('/')
         if year_first:
             new_date = '20' + date_parts[2] + '_' + date_parts[0].zfill(2) + '_' + date_parts[1].zfill(2)
@@ -197,8 +224,8 @@ class DataAgent:
         else:
             new_date = date_parts[0].zfill(2) + '_' + date_parts[1].zfill(2)  + '_' +'20' + date_parts[2] 
             #new_date = '_'.join(date_parts[:2]+['20'+date_parts[2]])
-        folder_path = self.gen_data_path + '\\' + self.subject + '\\' + self.subject + '_' + new_date + '\\'
-        return folder_path, new_date
+        save_folder_path = self.save_path + '\\' + self.subject + '\\' + self.subject + '_' + new_date + '\\'
+        return save_folder_path, new_date
         
     def add_param_path(self, param_path=None):
         # Adds a search directory for parameters saved in config files
@@ -240,6 +267,15 @@ class DataAgent:
 
 
     def get_targets(self, date, file_type='txt', save=False):
+        """ Function that loads the target position data from a loaded bag file and stores it to a 
+            local file (.txt by default)
+        
+            Parameters
+            ----------
+            date       : (str) String containing a date entry in the format of MM/DD/YY
+            file_type  : (str) Date type of the log file
+            save       : (bool) Option to save the data after loading
+        """
     
         [folder_path, new_date] = self.build_path(date)            
         file_name = new_date + '_TARGETS.' + file_type
@@ -254,9 +290,19 @@ class DataAgent:
             save_as(df_file, folder_path, file_name)
             print("Done")
 
+
     def get_forces(self, date, file_type='txt', save=False):
-        # Function that grabs the force transformation data for the robot and the cursor from a 
-        # loaded bag file and stores it to a local file (.txt by default)
+        """ Function that loads the force transformation data for the robot and the cursor from a 
+            loaded bag file and stores it to a local file (.txt by default)
+        
+            Parameters
+            ----------
+            date       : (str) String containing a date entry in the format of MM/DD/YY
+            file_type  : (str) Date type of the log file
+            save       : (bool) Option to save the data after loading
+
+            
+        """
         [folder_path, new_date] = self.build_path(date)
         file_name_1 = new_date + '_FORCE_ROBOT_FEEDBACK.' + file_type
         file_name_2 = new_date + '_FORCE_ROBOT_COMMAND.' + file_type
@@ -276,8 +322,20 @@ class DataAgent:
             save_as(f_cursor_df_file, folder_path, file_name_3)
             print("Done")
 
+
     def get_metrics(self, date, file_type='txt', verbose=False, save=False):
-        # Saves the performance metrics of the loaded database in the directory specified as a .txt file by default unless also specified
+        """ Saves the performance metrics of the loaded database in the directory specified as 
+            a .txt file by default unless also specified
+        
+            Parameters
+            ----------
+            date       : (str) String containing a date entry in the format of MM/DD/YY
+            file_type  : (str) Date type of the log file
+            verbose    : (bool) Verbose text option
+            save       : (bool) Option to save the data after loading 
+        
+        """
+        
         
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_PERFORMANCE_METRICS.' + file_type
@@ -300,7 +358,7 @@ class DataAgent:
         if save:
             print('Saving metrics data to ' + (folder_path + file_name))
             with open((folder_path + file_name), "a") as f:
-                # ================= Add all the metadata information you want to save here ===============
+                # ===== Add any metadata information you want to save here ========
                 msg = new_date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(N_failure) + ",Success_Rate:" + str(100*N_success/N_trials) + "\n"
                 f.write(msg)
                 f.write(msg_trial_t_avg)
@@ -310,13 +368,16 @@ class DataAgent:
                     f.write(msg_target_r)
                     f.write(msg_cursor_r)
                     f.write(msg_enforce_orient)
-                # ========================================================================================
+                # =================================================================
                 f.close()
 
             print("Done")
 
 
     def save_all_data(self, date, file_type='txt'):
+        """ Function that saves all the data collected from a log file into a data frame.
+        """
+        
         try:
             print('\n=== Grabbing all data ===\n')
             [folder_path, new_date] = self.build_path(date)          
@@ -335,11 +396,47 @@ class DataAgent:
             
             
 
-    def move_raw_data(self):
-        # Function that moves the files found in the searching directory to the raw data directory, if specified
-        if self.raw_data_path is not None and self.search_dir is not None:
-            for x in os.walk(self.search_dir):
-                shutil.move(self.search_dir + x[0], self.raw_data_path, copy_function = shutil.copytree)
+    def move_files_to_data_dir(self, date, verbose=False):
+        """ Function that moves the files found in the 'awaiting_process' subfolder contained in 
+            the subject's raw data directory to the generated data directory. 
+        
+            Parameters
+            ============
+            date       : (str) String containing a date entry in the format of MM/DD/YY
+            verbose    : (bool) Verbose text option
+                                
+            
+            Example:
+            ============
+            >> import glob
+            >>
+            >> with open('/home/user/documents/file.txt', 'w') as fp:
+            >> ...  pass
+            >>
+            >> root_path = '/home/user/documents'
+            >> save_path = '/home/user/downloads'
+            >> agent = DataAgent('TestUser', root_path, save_path)
+            >>
+            >> glob.glob(root_path)
+            >> ['/home/user/documents/file.txt']
+            >>
+            >> agent.moves_files_to_data_dir('7/27/23')
+            >> glob.glob(root_path)
+            >> ['/home/user/documents/']
+            >> glob.glob(save_path)
+            >> ['/home/user/downloads/TestUser/TestUser_2023_07_27'/file.txt']
+                    
+        """
+        
+        # Creates a subfolder in the subjects data folder
+        [folder_path, new_date] = self.build_path(date) 
+        folder_path = os.path.join(self.search_path, '../', self.subject + '_' + new_date)
+        if os.path.isdir(self.search_path):        
+            dir_list = glob.glob(self.search_path + "/*")
+            for dir_ in dir_list:
+                if verbose: 
+                    print("moving {} to {}".format(dir_, folder_path))
+                shutil.move(dir_, folder_path)
                 
                 
                 
@@ -429,7 +526,11 @@ class DataAgent:
 
 
     def parse_files(self, data):
-        """"""
+        """
+        
+        
+        
+        """
         parsed_data = {}
         for date_str, str_list in data.items():
             if date_str not in parsed_data:
@@ -467,13 +568,13 @@ class DataAgent:
 
 
     def get_param_from_file(self, param_path=None, param_name=None):
-        """ Checks directory for config files in .yaml format, searches for the specified parameter 
-            and returns an associated value
+        """ Checks directory for config files in .yaml format, searches for the specified 
+            parameter and returns an associated value
         
             Parameters
             ----------
             param_path : (str) directory for config files
-            param_name : (str/list) Can be a single string or list of strings indicating the parameter
+            param_name : (str/list) Can be a single or list of strings indicating the parameter
                                     name (and subfields) to search for
             Return
             ---------
@@ -518,23 +619,32 @@ class DataAgent:
   
         
     def get_files(self, file_path=None, file_type=None):
-        """ Recursively goes through each folder and returns a dict with the file names for each day.
-            Days with multiple files in them are numerically arranged
+        """ Function that recursively goes through each folder from a received directory and returns a python dictionary with the file names for each 
+            unique date detected. Days with multiple files in them are numerically arranged
+        
+            Parameters
+            ----------
+            file_path : (str) string containing an absolute directory to the data 
+            file_type : (str) data file type
+            
+            Return
+            ---------
+            parsed_files : (dict) Python dictionary with dates for keys and lists of associated filenames for each unique date 
         """
         
         if file_path is not None and type(file_path)==str:
             if self.check_path(file_path):
-                self.search_dir = file_path
+                self.search_path = file_path
             else:
                 return
         if file_type is not None and type(file_type)==str:
             self.file_type = file_type
 
         print("Searching for files...")
-        self.file_list = glob.glob(self.search_dir + "/**/*" + self.file_type, recursive=True)
+        self.file_list = glob.glob(self.search_path + "/**/*" + self.file_type, recursive=True)
         print("Found {} files with file type '{}'".format(len(self.file_list), self.file_type))
         if self.verbose:
-            print("Files found in '{}' matching '{}' file type:".format(self.search_dir, self.file_type))
+            print("Files found in '{}' matching '{}' file type:".format(self.search_path, self.file_type))
             for item in self.file_list:
                 print("\t" + item)
 
@@ -553,9 +663,9 @@ class DataAgent:
                 print("Files matching {}: {}".format(date[1], data[date[0]]))
 
         # Before returning list, sort files by arranging them in specified order
-        filtered_data = self.parse_files(data)
+        parsed_files = self.parse_files(data)
 
-        return filtered_data
+        return parsed_files
         
         
     def get_topic_data(self, topic, options=None):

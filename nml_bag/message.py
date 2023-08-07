@@ -1,9 +1,9 @@
-"""
-Functionality related to reading ROS2 messages from bag files containing NML experimental data.
+""" Functions for working with ROS2 messages that have been read from bag files.
 
 ROS2 bag_ files serialize message objects (by default_, in CDR_ format). The 
 rosbag2 package does not automatically convert messages to common Python3 data 
-structures. This package accomplishes that conversion.
+structures. This module provides convenient functions for accomplishing that 
+conversion.
 
 .. _bag: https://docs.ros.org/en/galactic/Tutorials/Ros2bag
          /Recording-And-Playing-Back-Data.html)
@@ -11,6 +11,15 @@ structures. This package accomplishes that conversion.
 .. _rosbag2: https://github.com/ros2/rosbag2#rosbag2
 .. _CDR: https://en.wikipedia.org/wiki/Common_Data_Representation
 """
+
+# Copyright 2022 Carnegie Mellon University Neuromechatronics Lab
+# 
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Contact: a.whit (nml@whit.contact)
+
 
 # Import functionality for dynamically loading message objects.
 import importlib

@@ -25,20 +25,33 @@
 
 import sys
 import os
-import pandas as pd
 from data_utils import DataAgent
 
 save = True # Enable if Raptor is online
 
 if __name__ == '__main__':
 
-    search_dir = r'D:\dev\nml_nhp\ros_workspace-testing\data\awaiting_process'
-    #save_path = r'D:\dev\nml_nhp\ros_workspace-testing\data\Cursor_Task'
-    save_path = r'R:\NMLShare\generated_data\primate\Cursor_Task'
-    agent = DataAgent(search_dir=search_dir, subject='Forrest', gen_data_path=save_path)
+    #default parameters 
+    subject = 'Forrest'
+    raw_data_path = '/run/user/1000/gvfs/smb-share:server=raptor.ni.cmu.edu,share=nml/NMLShare/raw_data/primate'    
+    save_data_path = '/run/user/1000/gvfs/smb-share:server=raptor.ni.cmu.edu,share=nml/NMLShare/generated_data/primate/Cursor_Task'
     
-    # Pass directory to where .yaml files are for use with metadata collection
-    config_dir = r'D:\dev\nml_nhp\ros_workspace-testing\config'
+    if len(sys.argv) > 1:
+        subject = sys.argv[1]
+        
+    if len(sys.argv) > 2:
+        raw_data_dir = sys.argv[2]
+
+    search_dir = os.path.join(raw_data_path, "{}".format(subject), "awaiting_process")
+
+    if len(sys.argv) > 3:
+        save_data_path = sys.argv[3]
+
+    # Create the DataAgent object, passing the subject name, and search and save directories
+    agent = DataAgent(subject=subject, search_dir=search_dir, save_path=save_data_path)
+    
+    # Include directory to where .yaml config files are for use with metadata collection
+    config_dir = r'/home/nml/nml_nhp/nml_plexon-ros_workspace/config'
     agent.add_param_path(config_dir)
 
     # Check that the directory is valid, continue if so. DataAgent object saves file path
@@ -48,9 +61,13 @@ if __name__ == '__main__':
         for date, files in bag_file_list.items():
             print("Reading bag files for {}: {}".format(date, files))
             agent.read_files(files=files)  # this step can take a few minutes to an hour...
-                       
-            agent.get_forces(date, save=save)
+                      
+            #agent.get_forces(date, save=save)
             agent.get_cursor_pos(date, save=save)
             agent.get_targets(date, save=save)
             agent.get_states(date, save=save)
             agent.get_metrics(date, verbose=True, save=save)
+            
+            agent.move_files_to_data_dir(date)
+            
+            

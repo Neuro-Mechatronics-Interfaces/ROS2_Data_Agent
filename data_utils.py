@@ -9,6 +9,7 @@
 import re
 import os
 import glob
+import time
 import shutil
 from openpyxl import load_workbook, Workbook
 import pandas as pd
@@ -30,8 +31,57 @@ def convert_to_utc(t_val):
     
     return float(t_val[:10] + '.' + t_val[10:16])
 
+class ArgParser:
+    """ An argument parser that searches for keywords in a scanned text and outputs the value associated 
+        with the matched key with a filled-in dictionary
     
+    Parameters
+    ==========
+    keys:  (list)
+    text_path: (str) path to the directory containing the 'config.txt' file
+    delimiter: (str) Delimiter character to split text lines with
+    verbose: (bool) enable/disable verbose output
+    skip_empty: (bool) enable/diable the option to include keys with empty values
+    
+    Returns
+    =======
+    parsed_args: (dict) A dictionary containg keys with each of the parameters discovered in a text file.
+    
+    """
 
+    def __init__(self, text_path='', delimiter="=", verbose=False, skip_empty=True):
+        self.verbose = verbose
+        self.skip_empty = skip_empty
+        #self.scan_file(text_path, delimiter)
+    
+    def scan_file(self, text_path='', delimiter="="):
+        """
+        
+        """
+        
+        if not text_path:
+            text_path = os.path.join(os.getcwd(),'config.txt')
+            
+        with open(text_path) as f:
+            lines = f.readlines()
+            if self.verbose: print(lines)
+            
+            parsed_args = {}
+            for line in lines:
+                temp = line.split(delimiter)
+                if len(temp)!=2: 
+                    if self.verbose: print('Parameter missing delimiter on line')
+                elif temp[1]=='\n' and self.skip_empty:
+                    if self.verbose: print('Empty parameter detected, skipping\n')
+                else:
+                    val = re.sub('\n','',temp[1])
+                    #val = re.search('[^\\n]', temp[1])
+                    if self.verbose: print(val)
+                    parsed_args[temp[0]] = val
+            
+            return parsed_args
+    
+    
 class BagParser:
     """ A ROS2 bag file parser that utilizes the nml_bag 'Reader' Class and its ROS2 Bag file wrappers
        to collect information about the task experiment recorded.
@@ -396,13 +446,14 @@ class DataAgent:
             
             
 
-    def move_files_to_data_dir(self, date, verbose=False):
+    def move_files_to_data_dir(self, date, new_path=None, verbose=False):
         """ Function that moves the files found in the 'awaiting_process' subfolder contained in 
-            the subject's raw data directory to the generated data directory. 
+            the subject's raw data directory to the raw or generated data directory. 
         
             Parameters
             ============
             date       : (str) String containing a date entry in the format of MM/DD/YY
+            new_path   : (str) replacement directory if not using the save path
             verbose    : (bool) Verbose text option
                                 
             
@@ -427,16 +478,27 @@ class DataAgent:
             >> ['/home/user/downloads/TestUser/TestUser_2023_07_27'/file.txt']
                     
         """
+        # Closes the handle to the data file if still opened
+        self.parser = None
         
         # Creates a subfolder in the subjects data folder
         [folder_path, new_date] = self.build_path(date) 
-        folder_path = os.path.join(self.search_path, '../', self.subject + '_' + new_date)
+        if new_path:
+            print("received: {}".format(new_path))
+            folder_path = os.path.join(new_path, self.subject + '_' + new_date)
+        else:
+            folder_path = os.path.join(self.search_path, '../', self.subject + '_' + new_date)
+
+        if verbose: print("New directory: {}".format(folder_path))
         if os.path.isdir(self.search_path):        
             dir_list = glob.glob(self.search_path + "/*")
             for dir_ in dir_list:
                 if verbose: 
                     print("moving {} to {}".format(dir_, folder_path))
-                shutil.move(dir_, folder_path)
+                if os.path.isdir(folder_path):
+                    print("Stopping transfer of {} to {}, directory already exists".format(dir_, folder_path))
+                else:
+                    shutil.move(dir_, folder_path)
                 
                 
                 
@@ -564,6 +626,8 @@ class DataAgent:
             
             
     def read_files(self, files=None):
+        if not self.parser:
+            self.parser = BagParser()
         self._data = self.parser.read_bag_file(files)
 
 

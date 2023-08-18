@@ -1,5 +1,5 @@
-SUBJECT=TestUser
-SEARCH_PATH=
-SAVE_PATH=
-CONFIG_PATH=
-
+SUBJECT=Forrest
+SEARCH_PATH=/run/user/1000/gvfs/smb-share:server=raptor.ni.cmu.edu,share=nml/NMLShare/raw_data/primate/Forrest/awaiting_process
+SAVE_PATH=/run/user/1000/gvfs/smb-share:server=raptor.ni.cmu.edu,share=nml/NMLShare/generated_data/primate/Cursor_Task
+CONFIG_PATH=/home/nml/nml_nhp/nml_plexon-ros_workspace/config
+NEW_PATH=/run/user/1000/gvfs/smb-share:server=raptor.ni.cmu.edu,share=nml/NMLShare/raw_data/primate/Forrest/

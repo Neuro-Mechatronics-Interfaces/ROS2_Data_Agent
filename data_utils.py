@@ -68,7 +68,8 @@ class ArgParser:
             
             parsed_args = {}
             for line in lines:
-                temp = line.split(delimiter)
+                
+                temp = line.split(delimiter, 1) # first occurence
                 if len(temp)!=2: 
                     if self.verbose: print('Parameter missing delimiter on line')
                 elif temp[1]=='\n' and self.skip_empty:
@@ -135,9 +136,10 @@ class BagParser:
 
     """
 
-    def __init__(self, files=None, verbose=False, **kwargs):
+    def __init__(self, files=None, file_type='.mcap', verbose=False, **kwargs):
         self.verbose = verbose
         self.files = files
+        self.file_type = file_type
         self.reader_obj = None
         if files:
             self.reader_obj = self.read_bag_file(files)
@@ -157,13 +159,21 @@ class BagParser:
         """
         print("Reading bag file")
         obj = []
+
+        # Need to define the storage ID with the Reader object before attempting to access files., especially if different from 
+        ft = self.file_type
+        if ft == '.db3' or ft == 'db3' or ft == 'sqlite3':
+            storage_id = 'sqlite3'
+        elif ft == '.mcap' or ft == 'mcap':
+            storage_id = 'mcap'
+
         if type(file_path) == str:
             if self.verbose: print('Reading bag file from {}'.format(file_path))
-            obj[0] = Reader(file_path)
+            obj[0] = Reader(file_path, storage_id=storage_id)
         if type(file_path) == list:
-            for file in file_path:
-                if self.verbose: print('Reading bag file from {}'.format(file))
-                obj.append(Reader(file))
+            for f in file_path:
+                if self.verbose: print('Reading bag file from {}'.format(f))
+                obj.append(Reader(f, storage_id=storage_id))
         else:
             print('Error -  Be sure to pass a string directory or list of string directories')
 
@@ -194,9 +204,14 @@ class DataAgent:
 
     Parameters
     ----------
-    *args : (list) system arguments passed through to the constructor
-    file_type: (str) file type to search for in all folders from root directory
-    verbose: (bool) enable/disable verbose output
+    *args :      (list) system arguments passed through to the constructor
+    subject:     (str) Name of the subject to identify data with
+    search_path: (str) Directory for raw data files
+    save_path:   (str) Directory for the generated data files
+    param_path:  (str) directory for the task's .yaml config files for metadata collection
+    file_type:   (str) file type to search for in all folders from root directory
+    verbose:     (bool) enable/disable verbose output
+    *kargs :     (dict) Keyword arguments passed to superclass constructor_.
     """
 
     def __init__(self, 
@@ -204,7 +219,7 @@ class DataAgent:
                  search_path=None, 
                  save_path=None, 
                  param_path=None, 
-                 file_type='.db3', 
+                 file_type=".db3", 
                  notebook_path = r'G:\Shared drives\NML_NHP\Monkey Training Records',
                  verbose=False, 
                  **kwargs):
@@ -227,20 +242,33 @@ class DataAgent:
     def check_path(self, data_path=None):
         """Checks the folder directory as a valid path and looks for bag files in subdirectories
         """
-        if data_path is None:
+        if data_path is None and self.search_path is None:
             data_path = input("Please enter the parent folder directory: ")
 
-        # check that the parent directory is the one desired
-        if not os.path.isdir(data_path):
-            print("Error - path not valid: {}".format(data_path))
-            return False
-        else:
+        elif data_path is None and self.search_path:
+            data_path = self.search_path
+            
+        if os.path.isdir(data_path):
             # Saves directory to object (might be useful)
             self.search_path = data_path
-            if self.verbose:
-                print('Valid root directory')
+            if self.verbose: print('Valid root directory')
             return True
+        else:
+            print("Error - path not valid: {}".format(data_path))
+            return False
     
+    def set_file_type(self, file_type=None):
+        """ Overwrite the file type to read from
+        
+            Parameters
+            ===========
+            file_type: (str) the new file type
+        
+        """
+        if not file_type:
+            print("Warning, no file type specified. Please enter the file type as '.db3' or '.mcap'")
+        else:
+            self.file_type = file_type
     
     def build_path(self, date, year_first=True):
         """ Helper function that creates folder subdirectories based on the date passed into the 
@@ -283,46 +311,83 @@ class DataAgent:
             self.param_path = param_path
         
         
-    def get_cursor_pos(self, date, file_type='txt', save=False):
-        # Saves the cursor position file in the directory specified as a .txt file by default unless also specified                   
-        [folder_path, new_date] = self.build_path(date)
-        file_name = new_date + '_CURSOR_POS.' + file_type
-        
-        print('Grabbing cursor position data...\n')
-        df_file = self.get_topic_data('/cursor/position') # For just cursor position
-
-        if self.verbose:
-            print(df_file)
-
-        if save:
-            print('Saving cursor position data to:\n ' + (folder_path + file_name))            
-            save_as(df_file, folder_path, file_name)
-            print("Done")
-
-
-    def get_states(self, date, file_type='txt', save=False):
-    
-        [folder_path, new_date] = self.build_path(date)            
-        file_name = new_date + '_STATES.' + file_type
-        print('Grabbing states...\n')
-        df_file = self.get_topic_data('/task/center_out/state') # For just task states
-        
-        if self.verbose:
-            print(df_file)
-            
-        if save:
-            print('Saving task state events to:\n ' + (folder_path + file_name))        
-            save_as(df_file, folder_path, file_name)
-            print("Done")
-
-
-    def get_targets(self, date, file_type='txt', save=False):
-        """ Function that loads the target position data from a loaded bag file and stores it to a 
+    def get_cursor_pos(self, date, topic='/environment/cursor/position', file_type='txt', save=False):
+        """ Helper function that loads the cursor position data from a loaded bag file and stores it to a 
             local file (.txt by default)
         
             Parameters
             ----------
             date       : (str) String containing a date entry in the format of MM/DD/YY
+            topic      : (str) ROS2 topic containing the information
+            file_type  : (str) Date type of the log file
+            save       : (bool) Option to save the data after loading
+        """
+                 
+        [folder_path, new_date] = self.build_path(date)
+        file_name = new_date + '_CURSOR_POS.' + file_type
+        
+        print('Grabbing cursor position data...\n')
+        df_file = self.get_topic_data(topic) # For just cursor position
+
+        if save and df_file is not None:
+            print('Saving cursor position data to:\n ' + (folder_path + file_name))            
+            save_as(df_file, folder_path, file_name)
+            print("Done")
+
+
+    def get_states(self, date, topic='/machine/state', file_type='txt', save=False):
+        """ Helper function that loads the task states from a loaded bag file and stores it to a 
+            local file (.txt by default)
+        
+            Parameters
+            ----------
+            date       : (str) String containing a date entry in the format of MM/DD/YY
+            topic      : (str) ROS2 topic containing the information
+            file_type  : (str) Date type of the log file
+            save       : (bool) Option to save the data after loading
+        """
+    
+        [folder_path, new_date] = self.build_path(date)            
+        file_name = new_date + '_STATES.' + file_type
+        print('Grabbing states...\n')
+        df_file = self.get_topic_data(topic) # For just task states
+            
+        if save and df_file is not None:
+            print('Saving task state events to:\n ' + (folder_path + file_name))        
+            save_as(df_file, folder_path, file_name)
+            print("Done")
+                
+
+    def get_emg(self, date, topic='/pico_ros/emg/ch1', file_type='txt', save=False):
+        """ Helper function that loads the electromyographic recordings of a specific channel from a loaded bag file and stores it to a 
+            local file (.txt by default)
+        
+            Parameters
+            ----------
+            date       : (str) String containing a date entry in the format of MM/DD/YY
+            topic      : (str) ROS2 topic containing the information
+            file_type  : (str) Date type of the log file
+            save       : (bool) Option to save the data after loading
+        """
+        
+        print('Grabbing EMG data...\n')
+        df_file = self.get_topic_data(topic) # For just task states
+        
+        if save and df_file is not None:
+            [folder_path, new_date] = self.build_path(date)            
+            file_name = new_date + '_EMG.' + file_type
+            print('Saving emg data to:\n ' + (folder_path + file_name))    
+            save_as(df_file, folder_path, file_name)
+            print("Done")
+
+    def get_targets(self, date, topic='/environment/target/position', file_type='txt', save=False):
+        """ Helper function that loads the target position data from a loaded bag file and stores it to a 
+            local file (.txt by default)
+        
+            Parameters
+            ----------
+            date       : (str) String containing a date entry in the format of MM/DD/YY
+            topic      : (str) ROS2 topic containing the information
             file_type  : (str) Date type of the log file
             save       : (bool) Option to save the data after loading
         """
@@ -330,12 +395,9 @@ class DataAgent:
         [folder_path, new_date] = self.build_path(date)            
         file_name = new_date + '_TARGETS.' + file_type
         print('Grabbing targets...\n')
-        df_file = self.get_topic_data('/target/position') # For just task states
-
-        if self.verbose:
-            print(df_file)
+        df_file = self.get_topic_data(topic) # For just task states
             
-        if save:
+        if save and df_file is not None:
             print('Saving target position data to:\n ' + (folder_path + file_name))    
             save_as(df_file, folder_path, file_name)
             print("Done")
@@ -361,9 +423,6 @@ class DataAgent:
         f_robot_df_file = self.get_topic_data('/robot/feedback/force') # Force feedback data from the robot
         f_cmd_df_file = self.get_topic_data('/robot/command/force') # Force commands sent to the robot
         f_cursor_df_file = self.get_topic_data('/cursor/force') # Cursor force feedback
-
-        if self.verbose:
-            print(f_robot_df_file)
             
         if save:
             print('Saving force data to:\n ' + (folder_path + new_date + '_FORCE_* custom topic extension:\n  "ROBOT_FEEDBACK"\n  "ROBOT_COMMAND"\n  "CURSOR\n")' ))    
@@ -373,7 +432,7 @@ class DataAgent:
             print("Done")
 
 
-    def get_metrics(self, date, file_type='txt', verbose=False, save=False):
+    def get_metrics(self, date, topic='/machine/state', file_type='txt', verbose=False, save=False):
         """ Saves the performance metrics of the loaded database in the directory specified as 
             a .txt file by default unless also specified
         
@@ -386,18 +445,19 @@ class DataAgent:
         
         """
         
-        
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_PERFORMANCE_METRICS.' + file_type
 
-        print('Grabbing performance metrics...\n')        
-        [N_trials, N_success, N_failure] = self.get_trial_performance()
+        print('Grabbing performance metrics...')
+        [N_trials, N_success, N_failure] = self.get_trial_performance(topic)
+
         if self.param_path:
             msg_target_n = 'N_TARGETS:' + self.get_param_from_file(self.param_path, 'n_targets') + "\n"
-            msg_target_r = 'TARGET_RADIUS:' + self.get_param_from_file(self.param_path, ['target_0','radius']) + "\n"
+            msg_target_r = 'TARGET_RADIUS:' + self.get_param_from_file(self.param_path, ['target','radius']) + "\n"
             msg_cursor_r = 'CURSOR_RADIUS:' + self.get_param_from_file(self.param_path, ['cursor','radius']) + "\n"
-            msg_enforce_orient = 'ENFORCE_ORIENTATION:' + self.get_param_from_file(self.param_path, 'enforce_orientation') + "\n"
-            msg_trial_t_avg = 'MEAN_TRIAL_T:' + str(self.get_mean_trial_time()) + "\n"
+            #msg_enforce_orient = 'ENFORCE_ORIENTATION:' + self.get_param_from_file(self.param_path, 'enforce_orientation') + "\n"
+            msg_trial_t_avg = 'MEAN_TRIAL_T:' + str(self.get_mean_trial_time(topic)) + "\n"
+
 
         if verbose:
             print("[{}] Performance metrics:\n\n".format(new_date))
@@ -417,7 +477,7 @@ class DataAgent:
                     f.write(msg_target_n)
                     f.write(msg_target_r)
                     f.write(msg_cursor_r)
-                    f.write(msg_enforce_orient)
+                    #f.write(msg_enforce_orient)
                 # =================================================================
                 f.close()
 
@@ -625,10 +685,14 @@ class DataAgent:
             return False
             
             
-    def read_files(self, files=None):
+    def read_files(self, files=None, display_topics=False):
         if not self.parser:
             self.parser = BagParser()
         self._data = self.parser.read_bag_file(files)
+        if display_topics:
+            for obj in self._data:
+                print("Topics present: ")
+                print("{}\n".format([i for i in obj.topics]))
 
 
     def get_param_from_file(self, param_path=None, param_name=None):
@@ -704,8 +768,9 @@ class DataAgent:
         if file_type is not None and type(file_type)==str:
             self.file_type = file_type
 
-        print("Searching for files...")
-        self.file_list = glob.glob(self.search_path + "/**/*" + self.file_type, recursive=True)
+        folder_path = str(self.search_path) + "/**/*" + str(self.file_type)
+        print("Searching for files in [{}]...".format(folder_path))
+        self.file_list = glob.glob(folder_path, recursive=True)
         print("Found {} files with file type '{}'".format(len(self.file_list), self.file_type))
         if self.verbose:
             print("Files found in '{}' matching '{}' file type:".format(self.search_path, self.file_type))
@@ -725,6 +790,9 @@ class DataAgent:
             data[date[0]] = [i for i in self.file_list if date[1] in i]
             if self.verbose:
                 print("Files matching {}: {}".format(date[1], data[date[0]]))
+                #print("Files matching {}:".format(date[1]))
+                #for file_str in data[date[0]]:
+                #    print("\t{}".format(file_str))
 
         # Before returning list, sort files by arranging them in specified order
         parsed_files = self.parse_files(data)
@@ -748,28 +816,36 @@ class DataAgent:
             The 'options' parameter can be expanded for more unique data types as DataAgent evolves
 
         """
-        parsed_topic_data = []
         if not type(topic) == str:
-            print("bag topic input must be string")
+            print("Warning: topic input must be string")
             return None
 
-        if self.verbose:
-            print("Grabbing data from {}".format(topic))
-        
-        reader_obj = self._data
-        for reader in reader_obj:
+        parsed_topic_data = []
+        print("Searching for '{}' topic data...00%".format(topic), end="")
+        #print("\b\b\b{:02d}%".format(val), end="")
+        for i, reader in enumerate(self._data):
+                    
+            print("\b\b\b{:02d}%".format( int( 100*(i+1)/(len(self._data) + 1) ) ))
             for el in reader.records:
                 if el['topic'] == topic:
                     parsed_topic_data.append(el)
+            if len(parsed_topic_data) == 0:
+                print("Warning, topic '{}' not found in bag file, Stopping search.".format(topic))
+                return None
 
+        print("\b\b\b\bDone\n=======================================================")
+        parsed_topic_df = None
         if len(parsed_topic_data) > 0:
             parsed_topic_df = pd.DataFrame(parsed_topic_data)
+            if self.verbose:
+                print(parsed_topic_df)
+            return parsed_topic_df
         else:
-            print("Warning - Could not find data with topic {}".format(topic))
-            parsed_topic_df = None
-        return parsed_topic_df
+            print("Warning: Could not find the topic '{}' in the loaded files. Check topic spelling".format(topic))
+            return None
+        
 
-    def get_trial_performance(self):
+    def get_trial_performance(self, topic='/machine/state'):
         """ Helper function that gets the task performance statistics
 
         Returns
@@ -778,7 +854,7 @@ class DataAgent:
         N_success: (int) total success states
         N_failure: (int) total failure states
         """
-        df = self.get_topic_data('/task/center_out/state')
+        df = self.get_topic_data(topic)
         if df is not None:
             n_success = len(df[df['data'] == 'success'])
             n_failure = len(df[df['data'] == 'failure'])
@@ -788,7 +864,7 @@ class DataAgent:
             return 0, 0, 0
 
 
-    def get_mean_trial_time(self, start_state='move_a'):
+    def get_mean_trial_time(self, topic='task/state', start_state='move_a'):
         """ Function that finds the average duration of trials from the task state changes
         
         """
@@ -801,7 +877,7 @@ class DataAgent:
         # subtract SUCCESS state time with MOVE_A state time
         
         # For now we find the time between all hold_a states
-        df_states = self.get_topic_data('/task/center_out/state') # For just task states
+        df_states = self.get_topic_data(topic) # For just task states
         
         start_idx = df_states.index[df_states['data'] == start_state].tolist()
         start_t = [convert_to_utc(i) for i in df_states['time_ns'][start_idx]]

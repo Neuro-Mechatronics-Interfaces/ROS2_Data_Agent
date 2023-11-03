@@ -1,82 +1,67 @@
 """
-# Copyright 2022 Carnegie Mellon University Neuromechatronics Lab
-#
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at https://mozilla.org/MPL/2.0/.
-#
-# Contact: Jonathan Shulgach (jshulgac@andrew.cmu.edu)
-#
-# This script searches a specified directory containing bag files and does the following:
-#
-# 1) Gets all the folders on the path that potentially have task data
-#    Ex: 'D:\dev\nml_nhp\ros_workspace-testing\data\220601_145454'
-#
-# 2) For each folder, see if a file exists AND if the notebook for the animal doesn't already have an entry for that day
-#    i. if it already exists, skip to next file
-#    ii. if it doesnt exist, do step 3
-#
-# 3) Read bag file(s) and obtain relevant data
-#
-# 4) Read and save cursor position (targets, etc.) data to a .txt file in a specified directory
-#
-# 5) Read and save performance metrics to a .txt file in the same directory
+ Copyright 2023 Carnegie Mellon University Neuromechatronics Lab
+
+ This Source Code Form is subject to the terms of the Mozilla Public
+ License, v. 2.0. If a copy of the MPL was not distributed with this
+ file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+ Contact: Jonathan Shulgach (jshulgac@andrew.cmu.edu)
+
+ This script demonstrates the capabilities of the DataAgent class. In general, it looks for bag files 
+ in a specified directory, collects and saves text files with key topic and matric data to a saving 
+ directory, creates relevant subject and training day subfolders, and moves files from a local 
+ path to a data server.
+
 """
 
 import sys
+import time
 from data_utils import DataAgent, ArgParser
 
-save = True # Enable if Raptor is online
+save = True
+verbose = True
 
 if __name__ == '__main__':
 
-    # Attempt to load parameters from config file
-    data = ArgParser(delimiter='=').scan_file()
-    
-    # Select user override if parameters provided
-    if len(sys.argv) > 1:
-        data['CONFIG_PATH'] = sys.argv[1]    
-    if len(sys.argv) > 2:
-        data['SUBJECT'] = sys.argv[2]        
-    if len(sys.argv) > 3:
-        data['SEARCH_PATH'] = sys.argv[4]
-    if len(sys.argv) > 4:
-        data['SAVE_PATH'] = sys.argv[4]
+    # Attempt to load parameters from a local config file. We can also pass in any system arguments
+    pars = ArgParser(delimiter='=', args=sys.argv).scan_file()
 
-    # Create the DataAgent object, passing the subject name, and search and save directories
-    agent = DataAgent(subject=data['SUBJECT'], 
-                      search_path=data['SEARCH_PATH'], 
-                      save_path=data['SAVE_PATH'], 
-                      param_path=data['CONFIG_PATH'],
-                      file_type='.mcap',
-                     )
-    
-    # Begin sorting the data files in the search path directory for each reading
-    bag_file_list = agent.get_files()
-        
+    # Create the DataAgent object. We can define the subject name, search, and save directories here, 
+    # but in this case we already read them from the config.txt file using ArgParser, so we can pass 
+    # the dictionary values as the constructor arguments
+    agent = DataAgent(subject=pars['subject'],     search_path=pars['search_path'],   
+                      save_path=pars['save_path'], param_path=pars['param_path'],
+                      file_type='.mcap', verbose=verbose )    
+
+    # Begin sorting the data files in the 'search_path' directory for each reading
+    bag_file_list = agent.search_for_files()
     for date, files in bag_file_list.items():
-        print("Reading bag files for {}: {}".format(date, files))
-        agent.read_files(files=files)  # this step can take a few minutes to an hour...
+        
+        # We will read the actual bag file(s) for the first time
+        print("Reading bag files for {}:".format(date))
+        agent.read_bag(files)  # this step can take a few minutes to an hour...
                       
-        #agent.get_forces(date, topic='/robot/command/force', save=save)
+        # Let's grab some topics and performance metric data
         agent.get_states(date, topic='/machine/state', save=save)
         agent.get_targets(date, topic='/environment/target/position', save=save)
         agent.get_cursor_pos(date, '/environment/cursor/position', save=save)
-        agent.get_emg(date, '/pico_ros/emg/ch1', save=save)
-        agent.get_metrics(date, '/machine/state', verbose=True, save=save)
-
-
-    # Delete object handle and recreate (temporary solution to closing the accessed .bag file)
-    agent = None
-    agent = DataAgent(subject=data['SUBJECT'], 
-                      search_path=data['SEARCH_PATH'], 
-                      save_path=data['SAVE_PATH']
-                      ) 
+        agent.get_metrics(date, '/machine/state', save=save)
         
-    # Finally move the files to the raw_data directory
-    for date, files in bag_file_list.items():
-        print("Moving all files for {}: {}".format(date, files))
-        #new_path = r"R:\NMLShare\raw_data\primate\Forrest"
-        agent.move_files_to_data_dir(date, data['NEW_PATH'], verbose=True)
+        # Some more methods below that can save specific topic types
+        #agent.get_emg(date, '/pico_ros/emg/ch1', save=save)
+        #agent.get_forces(date, topic='/robot/command/force', save=save)
+        
+        #TO-DO: generic topic data extraction and creating a text file to read later
+        #      ex: agent.get_topic(topic='/some/topic', save=True, tag=date, filename='SomeTopic.txt')  
+        
+        # When we're done analyzing the local files, we can move them to a data server. Instead of 
+        # moving each bag file separately, we will instead move & rename the entire training day 
+        # folder. Set the move_parent_folder argument to true tells the agent that whichever parent 
+        # folder the file belongs to will be moved and all the contents with it. We can also pass in 
+        # a 'date' tag to finish creating the saving directory
+        print("Moving all files for {}".format(date))
+        agent.transfer_data(files=files, new_path=pars['new_path'], tag=date, move_parent_folder=True)
+        
             
+    # And we are done!
             

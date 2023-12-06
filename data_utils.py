@@ -10,7 +10,9 @@ import re
 import os
 import glob
 import time
+import scipy.io as sio
 import shutil
+import datetime
 from openpyxl import load_workbook, Workbook
 import pandas as pd
 import numpy as np
@@ -21,6 +23,7 @@ def save_as(df_file, folder_path, file_name):
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
     df_file.to_csv((folder_path + file_name))
+    print("Saving complete")
         
         
 def convert_to_utc(t_val):
@@ -30,6 +33,38 @@ def convert_to_utc(t_val):
         t_val = str(t_val)
     
     return float(t_val[:10] + '.' + t_val[10:16])
+
+def get_ros2_datatypes(msg):
+    # Helper function to get the message sub-datatypes needed 
+    if msg == 'rcl_interfaces/msg/Log':
+        sub_msg = ['msg','file']
+    elif msg == 'geometry_msgs/msg/Vector3':
+        sub_msg = ['x', 'y', 'z']
+    elif msg == 'rcl_interfaces/msg/ParameterEvent':
+        sub_msg = ['new_parameters']
+    elif msg == 'example_interfaces/msg/String':
+        sub_msg = ['data']
+    elif msg == 'std_msgs/msg/String':
+        sub_msg = ['data']
+    elif msg == 'geometry_msgs/msg/Point':
+        sub_msg = ['x', 'y', 'z']
+    elif msg == 'example_interfaces/msg/Int32':
+        sub_msg = ['data']
+    elif msg == 'std_msgs/msg/Int32':
+        sub_msg = ['data']
+    elif msg == 'example_interfaces/msg/Float64':
+        sub_msg = ['data']
+    elif msg == 'std_msgs/msg/ColorRGBA':
+        sub_msg = ['r', 'g', 'b', 'a']
+    elif msg == 'rosbag2_interfaces/msg/WriteSplitEvent':
+        sub_msg = ['opened_file','closed_file']
+    else: 
+        print("ROS2 datatype {} not recognized, subclass data unknown or not supported yet".format(msg))
+        return None
+    
+    return sub_msg
+    
+
 
 class ArgParser:
     """ An argument parser that searches for keywords in a scanned text and outputs the value associated 
@@ -225,7 +260,7 @@ class DataAgent:
             if self.verbose: print('Valid root directory')
             return data_path
         else:
-            print("Warning, path doesn't exist. PLease fix path and retry, otherwise path will be set to 'None':\n\n{}".format(data_path))
+            print("Warning, path doesn't exist. Please fix path and retry, otherwise path will be set to 'None':\n\n{}".format(data_path))
             return None
     
         
@@ -264,8 +299,12 @@ class DataAgent:
                     pass
 
             return skip        
+
     
-                
+    def convert_digits_to_timestamp(self, str_number):
+        return '{}:{}:{}'.format(str_number[:2], str_number[2:4], str_number[4:])    
+
+           
     def get_notebook_data(self, animal, use_dataframe=True):
         """ Access the notebook training data from the subjected specified
 
@@ -289,7 +328,7 @@ class DataAgent:
         return d
 
 
-    def get_cursor_pos(self, date, topic='/environment/cursor/position', file_type='txt', save=False, overwrite=False):
+    def get_cursor_pos(self, date, topic='/environment/cursor/position', save=False, file_type='txt', overwrite=False):
         """ Helper function that loads the cursor position data from a loaded bag file and stores it 
             to a local file (.txt by default)
         
@@ -313,18 +352,13 @@ class DataAgent:
         print('Grabbing cursor position data...\n')
         df_file = self.get_topic_data(topic) # For just cursor position
 
-        if save and df_file is not None:
-            if os.path.exists((folder_path + file_name)):
-                if not overwrite:
-                    print('{} already in path. Set enable to True if you would like to save a new file'.format((folder_path + file_name)))
-                else:
-                    print('Saving cursor position data to:\n ' + (folder_path + file_name))            
-                    save_as(df_file, folder_path, file_name)
+        if save:
+            self.save_file(df_file, folder_path, file_name)
                     
         print("Done")
 
 
-    def get_states(self, date, topic='/machine/state', file_type='txt', save=False, overwrite=False):
+    def get_states(self, date, topic='/machine/state', save=False, file_type='txt', overwrite=False):
         """ Helper function that loads the task states from a loaded bag file and stores it to a 
             local file (.txt by default)
         
@@ -348,18 +382,13 @@ class DataAgent:
         print('Grabbing states...\n')
         df_file = self.get_topic_data(topic) # For just task states
             
-        if save and df_file is not None:
-            if os.path.exists((folder_path + file_name)):
-                if not overwrite:
-                    print('{} already in path. Set enable to True if you would like to save a new file'.format((folder_path + file_name)))
-                else:
-                    print('Saving data to:\n ' + (folder_path + file_name))            
-                    save_as(df_file, folder_path, file_name)
-                    
+        if save:
+            self.save_file(df_file, folder_path, file_name)
+            
         print("Done")
                 
 
-    def get_emg(self, date, topic='/pico_ros/emg/ch1', file_type='txt', save=False, overwrite=False):
+    def get_emg(self, date, topic='/pico_ros/emg/ch1', save=False, file_type='txt', overwrite=False):
         """ Helper function that loads the electromyographic recordings of a specific channel from a 
             loaded bag file and stores it to a local file (.txt by default)
         
@@ -382,14 +411,13 @@ class DataAgent:
         print('Grabbing EMG data...\n')
         df_file = self.get_topic_data(topic) # For just task states
         
-        if save and df_file is not None:
-            print('Saving emg data to:\n ' + (folder_path + file_name))    
-            save_as(df_file, folder_path, file_name)
+        if save:
+            self.save_file(df_file, folder_path, file_name)
         
         print("Done")
+        
 
-
-    def get_targets(self, date, topic='/environment/target/position', file_type='txt', save=False, overwrite=False):
+    def get_targets(self, date, topic='/environment/target/position', save=False, file_type='txt', overwrite=False):
         """ Helper function that loads the target position data from a loaded bag file and stores it 
             to a local file (.txt by default)
         
@@ -411,10 +439,10 @@ class DataAgent:
         print('Grabbing targets...\n')
         df_file = self.get_topic_data(topic) # For just task states
             
-        if save and df_file is not None:
-            print('Saving target position data to:\n ' + (folder_path + file_name))    
-            save_as(df_file, folder_path, file_name)
-            print("Done")
+        if save:            
+            self.save_file(df_file, folder_path, file_name)
+            
+        print("Done")
 
 
     def get_forces(self, date, file_type='txt', save=False, overwrite=False):
@@ -437,10 +465,9 @@ class DataAgent:
            print("File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and resave".format(file_name, folder_path))
            return
 
-        
         print('Grabbing force data...\n')
-        f_robot_df_file = self.get_topic_data('/robot/feedback/force') # Force feedback data from the robot
-        f_cmd_df_file = self.get_topic_data('/robot/command/force') # Force commands sent to the robot
+        f_robot_df_file = self.get_topic_data('/robot/feedback/force') # Force feedback from robot
+        f_cmd_df_file = self.get_topic_data('/robot/command/force') # Force commands sent to robot
         f_cursor_df_file = self.get_topic_data('/cursor/force') # Cursor force feedback
             
         if save:
@@ -451,7 +478,7 @@ class DataAgent:
             print("Done")
 
 
-    def get_metrics(self, date, topic='/machine/state', file_type='txt', verbose=False, save=False, overwrite=False):
+    def get_metrics(self, date, topic='/machine/state', save=False, file_type='txt', overwrite=False):
         """ Saves the performance metrics of the loaded database in the directory specified as 
             a .txt file by default unless also specified
         
@@ -480,7 +507,8 @@ class DataAgent:
             return
 
         # Display the trial perfoemance metrics on screen
-        if self.verbose or verbose:
+        #if self.verbose or verbose:
+        if True:
             print("[{}] Performance metrics:\n\n".format(new_date))
             print("Total number of trials: {}".format(N_trials))
             print("Correct trials:         {}".format(N_success))
@@ -572,15 +600,7 @@ class DataAgent:
                     
         if param_val is None:
             print("Could not find parameter '{}' in directory {}'".format(param_name, param_path))
-
-
-    def get_cursor_data(self):
-        """ Extract rows matching topic '/cursor/position'.
-            Output will be list of dict elements {position, timestamp, datatype, data}
-        """
-        df = self.get_bag_data('/cursor/position')
-        return df
-        
+                
                 
     def get_topic_data(self, topic, options=None):
         """ Function that returns a datafram object containing the topic's data if present
@@ -695,125 +715,6 @@ class DataAgent:
             return True
         else:
             return False
-    
-    
-    def transfer_data(self, files=None, new_path=None, tag=None, move_parent_folder=False):
-        """ Function that moves the files defined as filepath strings to a new directory.
-         
-        
-        Parameters:
-        -----------
-        files              : (str/list) Filepath string or list of filepath strings to move, can be 
-                               set to None to select files in the search directory
-        new_path           : (str) replacement directory if not using the save path
-        tag                : (str) String containing a date entry in the format of MM/DD/YY
-        move_parent_folder : (bool) Option to move the folder containing the data
-            
-            
-        Note:
-        ------------
-        Using shutil to transfer files or directories between disk drives has been known to thrown 
-        errors. This can happen if write permissions aren't set for the new directory. Using 'rsync' 
-        in a bash script would be a alternative method
-        
-        
-        Example 1, move single file:
-        ---------------------------
-        >> search_path = '/home/user/documents'
-        >> save_path = '/home/user/downloads'
-        >> agent = DataAgent('TestUser', search_path, save_path)
-        >>
-        >> with open('/home/user/documents/myfile.txt', 'w') as fp: # create empty text file
-        >> ...  pass
-        >> agent.transfer_data('/home/user/documents/myfile.txt','/home/user/downloads/myfile.txt')
-        >>
-        >> import glob
-        >> glob.glob(save_path)
-           ['/home/user/downloads/TestUser/myfile.txt']
-        
-        
-        Example 2, move and rename folder containing files in search path using tag
-        ---------------------------
-        >> date = '7/27/23' # Date tag entry in the format of MM/DD/YY
-        >>
-        >> import os
-        >> os.mkdir('/home/user/documents/MyFolder')
-        >> with open('/home/user/documents/MyFolder/myfile2.txt', 'w') as fp:
-        >> ...  pass
-        >> with open('/home/user/documents/MyFolder/myfile3.txt', 'w') as fp:
-        >> ...  pass
-        >>
-        >> agent.transfer_data(None, save_path, date)
-        >>
-        >> glob.glob(search_path)
-           ['/home/user/documents']
-        >> glob.glob(save_path)
-           ['/home/user/downloads/TestUser/TestUser_2023_07_27'/myfile2.txt', 
-            '/home/user/downloads/TestUser/TestUser_2023_07_27'/myfile3.txt']
-                    
-        """        
-        
-        if not (new_path or tag):
-            print("Error - Please specify either new directory or tag")
-            return
-        elif not new_path:
-            print("Error - Please specify at least a new directory")
-            return
-        
-        if not os.path.isdir(new_path):
-            print("Error - Please enter valid new path")
-            return
-            
-        if files:           
-            file_list = (files if type(files) is list else [files])
-        else:
-            # Get all the files located in the search path if no file is provided
-            file_list = glob.glob(self.search_path + "/*")
-            if not len(file_list)>0:
-                print('Error - No files or folders found in search directory')
-                return
-            
-        # If true, grabbing the parent directory of the file
-        if move_parent_folder:
-            print("'move_parent_folder' set to True, moving all contents in parent folder")
-            file_list = [str(os.path.dirname(file_list[0]))]            
-            
-        if self.verbose:
-            print("Preparing data to transfer: ")
-            [print(" | [{}]".format(i)) for i in file_list]
-        
-        folder_path = os.path.join(new_path, self.subject)
-        if not os.path.isdir(folder_path):
-            os.makedirs(folder_path)
-
-        if tag:
-            [ _, new_date] = self.build_path(tag) 
-            folder_path = os.path.join(folder_path, self.subject + '_' + new_date)
-            
-        for file_ in file_list:
-            if os.path.isfile(file_):
-                file_name = os.path.basename(file_)
-                transfer_path = os.path.join(folder_path, file_name)
-                if os.path.isfile(transfer_path):
-                    print(" | | Stopping transfer of {} to {}, file already exists".format(file_, transfer_path))     
-                    continue
-            if os.path.isdir(file_):
-                transfer_path = folder_path
-                if os.path.isdir(transfer_path):
-                    print(" | | Stopping transfer of {} to {}, folder already exists".format(file_, transfer_path))   
-                    continue
-                
-            if self.verbose:
-                print("Moving file:\n | Original path: {}\n | New path {}".format(file_, transfer_path))
-            
-            # Using the 'shutil.move()' method throws two error messages: [Errno 18, Errno 95] 
-            try:
-if os.path.isdir(transfer_path):
-                print("About to delete directory in 60 seconds. Check that the folder has been successfully transfered")
-                time.sleep(60)
-                shutil.move(os.path.realpath(file_), transfer_path)
-            except e:
-                print(e)
 
         
     def parse_files(self, data):
@@ -857,14 +758,64 @@ if os.path.isdir(transfer_path):
         print("Sorted files with most consecutive keys")
         return parsed_data
 
+    
+    def parse_digits_from_string(self, string):
+        """ Internal parser function to extract the date, timestamp, and file block from a file name
 
+        Parameters:
+        ----------
+        string     : (str) string of filename
+                        
+        Returns:
+        ----------
+        date_str: (str) Reformatted string in the date format of 'm/d/yy'
+        filetag : (str) timestamp number associated with the file
+        block   : (str) File identifier number from the same timestamp recording
+        temp    : (str) last match from regular expression 
+                               
+        """
+        temp = re.findall('(\d+)', string)
+        dd = int(temp[0][4:6])
+        mm = int(temp[0][2:4])
+        yy = int(temp[0][:2])
+        date_str = str(mm) + "/" + str(dd) + "/" + str(yy) # Covenient date format for reading
+        datetag = str(temp[0])                             # Original 6-digit date format for string matching
+        filetag = str(temp[1])                             # Original 6-digit time format for string matching
+        block = temp[-1]                                   # file index at the end
+        
+        dt = datetime.date(yy,mm,dd)
+        year = '20'+str(dt.year)
+        month = dt.month
+        day = dt.day
+
+        return datetag, date_str, filetag, block, [year, month, day]
+        
+    def parse_datestring(self, string):
+        """ Internal parser function to convert a 6-digit date into date components
+
+        Parameters:
+        ----------
+        string     : (str) 6-digit date string
+                        
+        Returns:
+        ----------
+        list    : (list) List with date in [YYYY, MM, DD] format 
+                               
+        """
+        temp = re.search('[0-9]{6}', string)
+        dt = datetime.date(int(temp[0][:2]),int(temp[0][2:4]), int(temp[0][4:6]))
+        year = '20'+str(dt.year)
+        month = dt.month
+        day = dt.day
+        return [year, month, day]
+    
+    
     def parse_str_date_info(self, string, year_format=None):
         """ Internal parser function to extract the date from a file name
 
         Parameters:
         ----------
-        date_str: (str) output string in a date format of 'm/d/yy' (can be changed if notebook 
-                        changes)
+        string     : (str) string of filename
                         
         Returns:
         ----------
@@ -880,66 +831,235 @@ if os.path.isdir(transfer_path):
 
         return info_str, temp.group()            
 
+    def parse_ros2_topics(self, df):
+        """ Reads a DataFrame and returns a Python dictionary with topics as keys and the 
+        correspinding data type in the values associated with that key. This shrinks down the df 
+        space since many Nan elements are created from non-overlapping ROS2 datatypes
+        
+        Parameters:
+        ----------
+        df          : (DataFrame) A pandas DataFrame containing the converted ROS2 bag file
+        
+        Return:
+        --------- 
+        data       : (dict) A Python dictionary where each key is a unique ROS2 topic and the value 
+                     containing the associated data
+        
+        Example:
+        ---------
+        >> df
+                               topic              time_ns  ... closed_file opened_file
+        0                    /rosout  1700254464603345720  ...         NaN         NaN
+        1       /robot/command/force  1700254464603372652  ...         NaN         NaN
+        2          /parameter_events  1700254464603388062  ...         NaN         NaN
+        3              /cursor/force  1700254464603401617  ...         NaN         NaN
+        4                    /rosout  1700254464603573544  ...         NaN         NaN
+        ...                      ...                  ...  ...         ...         ...
+        417735         /cursor/force  1700255126708233535  ...         NaN         NaN
+        417736  /robot/command/force  1700255126708379677  ...         NaN         NaN
+        417737  /robot/command/force  1700255126708697736  ...         NaN         NaN
+        417738  /robot/command/force  1700255126712198773  ...         NaN         NaN
+        417739  /robot/command/force  1700255126712477497  ...         NaN         NaN
 
-    def read_bag(self, file_path, display_topics=False):
+        [2639233 rows x 24 columns]
+        
+        >> agent = DataAgent()
+        >> ros2_dict = agent.parse_ros2_topics(df)
+        >> ros2_dict
+        {'/robot/command/force':{'type':'/geometry_msgs/msg/Point', 
+                                 'ts': [1700254464603372652, ...],
+                                 'data': {'x':[0.0...], 'y':[0.0...], 'z':[0.0...]}
+                                 'start_time': 2023-11-17 3:54:24 PM
+                                 }, 
+         '/rosout':{'type':'/rcl_interfaces/msg/Log', 
+                    'ts': [1700254464603345720, ...],
+                    'data': {'x':[0.0...], 'y':[0.0...], 'z':[0.0...]}
+                    'start_time': '2023-11-17 3:54:24 PM'
+                   },                 
+        """
+        print("Parsing ROS2 data from DataFrame")
+
+        start_time = df['time_ns'].iloc[0]
+
+        ros2_dict = {}
+        ros2_dict['info'] = '.mat file created using DataAgent'
+        ros2_dict['topics'] = []
+        ros2_dict['samples'] = []
+        ros2_dict['sample_rate'] = 'Check the samples field for sample rates of data channels'
+        ros2_dict['start_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time/1e9))
+        ros2_dict['file_modified'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        
+        date = time.strftime('%Y_%m_%d', time.localtime(start_time/1e9))
+        ros2_dict['name'] = "{}_{}_rosbag_A_0".format(self.subject, date)
+        
+        for i, topic in enumerate(df['topic'].unique()):
+
+            # Get all rows matching the topic name
+            topic_df = df.loc[df.index[df['topic'].isin([topic])]]
+            
+            # Get start time datestamp , timestamp, and ROS2 topic data type
+            temp = {'type': str(topic_df['type'].iloc[0])}
+            temp['topic'] = topic
+            #temp['start_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time/1e9))
+            temp['time_index'] = topic_df['time_ns'].to_list()
+            temp['time_s'] = ((topic_df['time_ns'] - start_time)/1e9).to_list()
+            temp['n_samples'] = len(topic_df)
+            temp['sample_rate'] = 1/np.mean(np.diff(temp['time_s']))
+            
+            # Find the sub data types associated with the ros2 topic            
+            subtype_keys = get_ros2_datatypes(topic_df['type'].iloc[0])
+            
+            # Fill in the 'data' 
+            data = {}
+            for key in subtype_keys:
+                data[key] = topic_df[key].to_list()
+            temp['msg_data'] = data
+            
+            
+            # Need to remove the '/' character from the key names otherwise the .mat file wont save
+            #topic = topic[1:] if topic[0] == '/' else topic
+            ros2_dict['topics'].append(topic)
+            ros2_dict['samples'].append(temp)
+            
+        return ros2_dict
+
+
+    def read_bag(self, file_path, combine=True, display_topics=False):
         """ Opens and reads the bag file specified by the parameter input.
 
         Parameters:
         ----------
-        file_path : (str) Single string or list of strings to concatenate data from multiple files
+        file_path      : (str) Single string or list of strings to concatenate data from multiple 
+                               files
+        combine        : (bool) Optional argument to combine the data read from the bag files
+        display_topics : (bool) Optional argument to display the topic data from the bag file(s)
 
-        Returns:
+
         ----------
-        obj      : (list) list of Reader object(s) containing ROS2 bag file data from each file read
+        Updates-> _data  : (list) list of Reader object(s) containing ROS2 bag file data from each 
+                                file read
+        
+        Notes:
+        ----------
+        Some bag files can have broken indicies preventing them from being loaded. To fix them, 
+        follow instructions from: https://stackoverflow.com/questions/18259692/how-to-recover-a-corrupt-sqlite3-database/57872238#57872238 
         
         """
-        obj = []
-
+        main_df = None
+        self._data = []
         # Need to define the storage ID with the Reader object before attempting to access files 
         ft = self.file_type
         if ft == '.db3' or ft == 'db3' or ft == 'sqlite3':
             storage_id = 'sqlite3'
+            #storage_id = 'mcap'
         elif ft == '.mcap' or ft == 'mcap':
             storage_id = 'mcap'
 
         if type(file_path) == str:
-            print(' | Reading bag file from {}'.format(file_path))
-            self._data[0] = Reader(file_path, storage_id=storage_id)
+            files = [file_path]
         elif type(file_path) == list:
-            for f in file_path:
-                print(' | Reading bag file from {}'.format(f))
-                self._data.append(Reader(f, storage_id=storage_id))
+            files = file_path
         else:
             print('Error - Be sure to pass a string directory or list of string directories')
             return
-
-        if display_topics:
-            for obj in self._data:
+            
+        for f in file_path:
+            print(" | Reading bag file from '{}'".format(f))
+            temp = Reader(f, storage_id=storage_id)
+            
+            if display_topics:
                 print("Topics present: ")
-                print("{}\n".format([i for i in obj.topics]))
+                print("{}\n".format([i for i in temp.topics]))
+
+            # Convert the bag file into a DataFrame
+            df_file = pd.DataFrame(temp.records)   
+                    
+            if combine:
+                if main_df is not None: 
+                    main_df = pd.concat([main_df, df_file], ignore_index=True, axis=0)
+                else: 
+                    main_df = df_file
+            else:
+                self._data.append(df_file)
                 
+        if combine:
+            self._data = main_df
+            
     
-
-    def save_all_data(self, date, file_type='txt'):
-        """ Function that saves all the data collected from a log file into a data frame.
-        """
+    def save_as_mat(self, file_name, df):
+        """ Helper function to save the dataframe as a .mat file
         
-        try:
-            print('\n=== Grabbing all data ===\n')
-            [folder_path, new_date] = self.build_path(date)          
-            file_name = new_date + '_DATA.' + file_type
+        """
+        file_path = file_name + ".mat"
+        #file_path = "myfile.mat"
+        print("Saving mat file to '{}'".format(file_path))
+        #data = {name: col.values for name, col in df.items()}
+        
+        ros_dict = self.parse_ros2_topics(df)
 
-            for reader in self._data:
-                #if self.verbose: print(reader)
-                #if self.verbose: print(reader.records)
-                df_file = pd.DataFrame(reader.records)
-                print('Saving data to:\n  ' + (folder_path + file_name))            
-                save_as(df_file, folder_path, file_name)
-        except:
-            print("Something went wrong with saving the data... Please investigate")
+        sio.savemat(file_path, ros_dict)
+        
+         
+    
+    def save_as_htf5(self, df, file_name):
+        """
+        # http://docs.h5py.org/en/latest/high/file.html
+        # http://blog.tremily.us/posts/HDF5/
+        # http://www.sam.math.ethz.ch/~raoulb/teaching/PythonTutorial/data_storage.html
+
+        """
+        file_path = file_name + '.h5'
+        print("saving dataframe to: '{}'".format(file_path))
+        
+        # Currently disorganized with the dataset saving. Need to investigate how to organize it better
+        #df.to_hdf(file_name, key='/data', mode='w')
 
 
-    def search_for_files(self, file_path=None, file_type=None):
+    def save_data(self, save_path=None, file_type='txt', df=None):
+        """ Function that saves all the data collected from a bag/log file into a directory with the
+        specified data format.
+        
+        Parameters:
+        ------------
+        save_path    : (str) Specified directory with the file name included
+        file_type    : (str) File type to save the file as
+        df           : (DataFrame) Optional input to save the specified DataFrame object isnead of the stored one
+        """ 
+        if True:       
+            #try:
+            #print('\n=== Grabbing all data ===\n')
+            #[folder_path, new_date] = self.build_path(date)          
+            #file_name = self.subject + '_' + new_date + '_DATA.' + file_type
+
+            # Overwrite folder path if suggested
+            if save_path is not None:
+                folder_path = save_path
+                
+            if df is not None:
+                data = df
+            else:
+                data = self._data
+                
+            if type(data)!=list:
+                data = [data]            
+
+            for dframe in data:
+                if file_type=='hdf5' or file_type=='.hdf5':
+                    #print("Saving bag file data to:\n    {}".format( save_path + '.h5'))  
+                    self.save_as_htf5(dframe, save_path)
+                elif file_type=='h5' or file_type=='.h5':
+                    self.save_as_htf5(dframe, save_path)
+                elif file_type=='csv' or file_type=='.csv':
+                    save_as(dframe, save_path)
+                elif file_type=='txt' or file_type=='.txt':
+                    save_as(dframe, save_path)
+                elif file_type=='mat' or file_type=='.mat':
+                    self.save_as_mat(save_path, dframe)
+        #except:
+        #    print("Something went wrong with saving the data... Please investigate")
+
+
+    def search_for_files(self, file_path=None, file_type=None, date_tag=None):
         """ Function that recursively goes through each folder from a received directory and returns a 
             python dictionary with the file names for each unique date detected. Days with multiple 
             files in them are numerically arranged.
@@ -948,52 +1068,105 @@ if os.path.isdir(transfer_path):
         ----------
         file_path : (str) string containing an absolute directory to the data 
         file_type : (str) data file type
+        date_tag  : (str) Argument to specify which dates to return in the data
             
         Return
         ---------
-        parsed_files : (dict) Python dictionary with dates for keys and lists of associated filenames 
+        data : (list) A List of Python dictionary with dates for keys and lists of associated filenames 
         		      for each unique date 
         		      
         """
-        
         if file_path is not None and type(file_path)==str:
             if self.check_path(file_path):
                 self.search_path = file_path
-            else:
-                return
+        
         if file_type is not None and type(file_type)==str:
             self.file_type = file_type
 
-        folder_path = str(self.search_path) + "/**/*" + str(self.file_type)
-        print("Searching for files in [{}]...".format(folder_path))
-        self.file_list = glob.glob(folder_path, recursive=True)
-        print("Found {} files with file type '{}'".format(len(self.file_list), self.file_type))
-        if self.verbose:
-            print("Files found in '{}' matching '{}' file type:".format(self.search_path, self.file_type))
-            for item in self.file_list:
-                print("\t" + item)
+        
+        print("Searching for bag files in '{}' ...".format(self.search_path))
+        # 'items' contains at least 1 tuple with: ('search path', [list of folders], [list of files])
+        items = [i for i in os.walk(self.search_path)]
 
-        # Collect all dates present in files to initialize dictionary
-        data = {}
-        for item in self.file_list:
-            date_str, matched_str = self.parse_str_date_info(item)
-            if date_str not in data:
-                self.date_list.append([date_str, matched_str])
+        if len(items)==1 and (items[0][1])==0 and (items[0][2])==0:
+            print("No folders or files found in search path '{}' ".format(self.search_path))
+            return None
+            
+        metadata = []
+        
+        # If any folders are present search them first as priority
+        if len(items[0][1])>0:
+            print("Found {} folder(s) in {}".format(len(items[0][1]), self.search_path))
+            if self.verbose: 
+                for f in items[0][1]: print("|    {}".format(f))
+            
+            if date_tag: print("|    Filtering files using date tag '{}'".format(date_tag))
+            
+            for i, folder in enumerate(items[0][1]):
+                data = {}    
+                
+                # If Specific date was requested, only collect files with matching date
+                if date_tag:
+                    date_match, _ = self.parse_str_date_info(folder)
+                    if date_match != date_tag:
+                        continue
+                                
+                file_search_path = str(self.search_path) + "/" + str(folder) + "/*" + str(self.file_type)
+                if self.verbose: print("\nSearching for files in '{}'...".format(file_search_path))
+                data['folder_path'] = items[i+1][0]                  # fill in the absolute path to the folder
+                data['files'] = sorted(glob.glob(file_search_path))  # Keep the full path for all files matching the file type, and sort
+                
+                if len(data['files']) > 0:
+                    data['block'] = []
+                    if self.verbose: print("|  Found {} files with file type '{}'".format(len(data['files']), self.file_type))                    
+                    for f in data['files']: 
+                        if self.verbose: print("|    '{}'".format(f))
+                        data['date_tag'], data['date'], data['file_tag'], block, date_info = self.parse_digits_from_string(f)
+                        data['year'], data['month'], data['day'] = date_info
+                        data['block'].append(int(block))         # Add the block number to the list, easiest way to keep track of files
+                        data['timestamp'] = self.convert_digits_to_timestamp(data['file_tag']) # Convert time into HH:MM:SS
+                else:
+                    print("No files ending in' {}' found in '{}'".format(self.file_type, data['folder_path']))
+                    continue
 
-                data[date_str] = None
+                # Fill in metadata with remaining items and sort the block numbers
+                data['file_type'] = self.file_type
+                data['block'] = sorted(data['block']) 
+                
+                if self.verbose: 
+                    print("\n folder metadata: ")
+                    for m in data:
+                        print("|  {}: {}".format(m, data[m]))
+                
+                # Add folder data to data list
+                metadata.append(data)
+                
+        
+        # Local bag files in the search directory
+        elif len(items[0][2])>0:
+            file_search_path = str(self.search_path) + "/*" + str(self.file_type)
+            data['files'] = glob.glob(file_search_path)
+            if len(data['files']) > 0:
+                data['block'] = []
+                for f in data['files']: 
+                    if self.verbose: print("|    '{}'".format(f))
+                    data['date_tag'], data['date'], data['file_tag'], block, date_info = self.parse_digits_from_string(f)
+                    data['year'], data['month'], data['day'] = date_info
+                    data['block'].append(int(block))         
+                    data['timestamp'] = self.convert_digits_to_timestamp(data['file_tag']) 
+                    data['file_type'] = self.file_type
+                    data['block'] = sorted(data['block']) 
+        
+                    # Add file data to data list
+                    metadata.append(data)
 
-        # Fill dictionary date keys with lists of corresponding files
-        for date in self.date_list:
-            data[date[0]] = [i for i in self.file_list if date[1] in i]
-            if self.verbose:
-                print("Files matching {}:".format(date[1]))
-                for item in data[date[0]]:
-                    print("\t" + item)
+            else:
+                print("No files ending in' {}' found in '{}'".format(self.file_type, self.search_path))
 
-        # Before returning list, sort files by arranging them in specified order
-        parsed_files = self.parse_files(data)
-
-        return parsed_files
+        # Sorting with the order of the files by the file_tag
+        metadata = self.sort_by(metadata, 'file_tag')
+    
+        return metadata
     
     
     def set_file_type(self, file_type=None):
@@ -1017,6 +1190,171 @@ if os.path.isdir(transfer_path):
         if output:
             return self.notebook_headers
    
+    def sort_by(self, file_list, key, descending=False):
+       """ Helper function to rearrange the contents of a list in ascending (or descending) order
+       with respect to a dictionary key
+       
+       Parameters:
+       -----------
+       file_list     : (list) A list of Python dictionaries which have the same key:value pairs
+       key           : (str) The dictionary key to sort all other data by
+       
+       Return:
+       -----------
+       sorted_list   : (list) The list of dictionaries rearranged
+       
+       Example:
+       ----------
+       >> from data_utils import DataAgent
+       >> data = [{'name': 'Yoda', 'age':900}, {'name': 'Grogu', 'age':50}]
+       >> agent = DataAgent()
+       >> sorted_list = agent.sort_by(data, 'age')
+       >> sorted_list
+       >> [{'name': 'Grogu', 'age': 50}, {'name': 'Yoda', 'age': 900}]
+       """
+       
+       sorted_list = sorted(file_list, key=lambda x: x[key], reverse=descending)
+       return sorted_list
+    
+   
+    def save_file(self, f, folder_path, file_name, overwrite=False, default_file_type='txt'):
+        """ Helper function that saves the file to the specific folder path
+        """
+        
+        # Check if file_name already has file type, if not use default
+        matches = re.search('.\w+', file_name)
+        if matches[-1][0] != '.':
+            file_name = file_name + '.'+ default_file_type
+        
+        if os.path.exists((folder_path + file_name)):
+            if not overwrite:
+                print('{} already in path. Set enable to True if you would like to save a new file'.format((folder_path + file_name)))
+        else:
+            print('Saving data to:\n ' + (folder_path + file_name))            
+            save_as(df_file, folder_path, file_name)
+
+
+    def transfer_data(self, files=None, new_path=None, tag=None, move_parent_folder=False):
+        """ Function that moves the files defined as filepath strings to a new directory.
+         
+        
+        Parameters:
+        -----------
+        files              : (str/list) Filepath string or list of filepath strings to move, can be 
+                               set to None to select files in the search directory
+        new_path           : (str) replacement directory if not using the save path
+        tag                : (str) String containing a date entry in the format of MM/DD/YY
+        move_parent_folder : (bool) Option to move the folder containing the data
+            
+            
+        Note:
+        ------------
+        Using shutil to transfer files or directories between disk drives has been known to thrown 
+        errors. This can happen if write permissions aren't set for the new directory. Using 'rsync' 
+        in a bash script would be a alternative method
+        
+        
+        Example 1, move single file:
+        ---------------------------
+        >> search_path = '/home/user/documents'
+        >> save_path = '/home/user/downloads'
+        >> agent = DataAgent('TestUser', search_path, save_path)
+        >>
+        >> with open('/home/user/documents/myfile.txt', 'w') as fp: # create empty text file
+        >> ...  pass
+        >> agent.transfer_data('/home/user/documents/myfile.txt','/home/user/downloads/myfile.txt')
+
+        >>
+        >> import glob
+        >> glob.glob(save_path)
+           ['/home/user/downloads/TestUser/myfile.txt']
+        
+        
+        Example 2, move and rename folder containing files in search path using tag
+        ---------------------------
+        >> date = '7/27/23' # Date tag entry in the format of MM/DD/YY
+        >>
+        >> import os
+        >> os.mkdir('/home/user/documents/MyFolder')
+        >> with open('/home/user/documents/MyFolder/myfile2.txt', 'w') as fp:
+        >> ...  pass
+        >> with open('/home/user/documents/MyFolder/myfile3.txt', 'w') as fp:
+        >> ...  pass
+        >>
+        >> agent.transfer_data(None, save_path, date)
+        >>
+        >> glob.glob(search_path)
+           ['/home/user/documents']
+        >> glob.glob(save_path)
+           ['/home/user/downloads/TestUser/TestUser_2023_07_27'/myfile2.txt', 
+            '/home/user/downloads/TestUser/TestUser_2023_07_27'/myfile3.txt']
+                    
+        """        
+        
+        if not (new_path or tag):
+            print("Error - Please specify either new directory or tag")
+            return
+        elif not new_path:
+            print("Error - Please specify at least a new directory")
+            return
+        
+        if not os.path.isdir(new_path):
+            print("Error - Please enter valid new path")
+            return
+            
+        if files:           
+
+            file_list = (files if type(files) is list else [files])
+        else:
+            # Get all the files located in the search path if no file is provided
+            file_list = glob.glob(self.search_path + "/*")
+            if not len(file_list)>0:
+                print('Error - No files or folders found in search directory')
+                return
+            
+        # If true, grabbing the parent directory of the file
+        if move_parent_folder:
+            print("'move_parent_folder' set to True, moving all contents in parent folder")
+            file_list = [str(os.path.dirname(file_list[0]))]            
+            
+        if self.verbose:
+            print("Preparing data to transfer: ")
+            [print(" | [{}]".format(i)) for i in file_list]
+        
+        folder_path = os.path.join(new_path, self.subject)
+        if not os.path.isdir(folder_path):
+            os.makedirs(folder_path)
+
+        if tag:
+            [ _, new_date] = self.build_path(tag) 
+            folder_path = os.path.join(folder_path, self.subject + '_' + new_date)
+            
+        for file_ in file_list:
+            if os.path.isfile(file_):
+                file_name = os.path.basename(file_)
+                transfer_path = os.path.join(folder_path, file_name)
+                if os.path.isfile(transfer_path):
+                    print(" | | Stopping transfer of {} to {}, file already exists".format(file_, transfer_path))     
+                    continue
+            if os.path.isdir(file_):
+                transfer_path = folder_path
+                if os.path.isdir(transfer_path):
+                    print(" | | Stopping transfer of {} to {}, folder already exists".format(file_, transfer_path))   
+                    continue
+                
+            if self.verbose:
+                print("Moving file:\n | Original path: {}\n | New path {}".format(file_, transfer_path))
+            
+            # Using the 'shutil.move()' method throws two error messages: [Errno 18, Errno 95] 
+            try:
+                if os.path.isdir(transfer_path):
+                    print("About to delete directory in 60 seconds. Check that the folder has been successfully transfered")
+                    time.sleep(60)
+                    shutil.move(os.path.realpath(file_), transfer_path)
+            except e:
+                print(e)
+
+
     
     def update_notebook(self, nb_df, date_str, data):
         """ Updates the dataframe with the new data specified by the date and header name

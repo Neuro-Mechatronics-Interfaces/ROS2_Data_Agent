@@ -18,7 +18,7 @@ import sys
 import time
 from data_utils import DataAgent, ArgParser
 
-save = True
+save = True 
 verbose = True
 
 if __name__ == '__main__':
@@ -59,8 +59,8 @@ if __name__ == '__main__':
         # folder. Set the move_parent_folder argument to true tells the agent that whichever parent 
         # folder the file belongs to will be moved and all the contents with it. We can also pass in 
         # a 'date' tag to finish creating the saving directory
-        print("Moving all files for {}".format(date))
-        agent.transfer_data(files=files, new_path=pars['new_path'], tag=date, move_parent_folder=True)
+        #print("Moving all files for {}".format(date))
+        #agent.transfer_data(files=files, new_path=pars['new_path'], tag=date, move_parent_folder=True)
         
             
     # And we are done!

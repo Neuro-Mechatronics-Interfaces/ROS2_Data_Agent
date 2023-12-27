@@ -54,6 +54,8 @@ def get_ros2_datatypes(msg):
         sub_msg = ['data']
     elif msg == 'example_interfaces/msg/Float64':
         sub_msg = ['data']
+    elif msg == 'example_interfaces/msg/Bool':
+        sub_msg = ['data']        
     elif msg == 'std_msgs/msg/ColorRGBA':
         sub_msg = ['r', 'g', 'b', 'a']
     elif msg == 'rosbag2_interfaces/msg/WriteSplitEvent':

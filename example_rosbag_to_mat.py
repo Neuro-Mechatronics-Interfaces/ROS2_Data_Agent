@@ -10,7 +10,7 @@
  This script converts ROS2 bag files from an experiment into a mat file into the same data directory
  """
 
-from data_utils import DataAgent
+from data_agent import DataAgent
 
 if __name__ == '__main__':
 

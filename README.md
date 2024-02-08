@@ -33,11 +33,11 @@ pip install .
 
 1. Import package.
    ```python
-   import data_utils as du
+   import data_agent as da
    ```
 2. Create the DataAgent object. A full list of potential initialization parameters (like the subject name, data search path, etc.) can be found in its [documentation](/doc/markdown/data_agent.md).
    ```python 
-   agent = du.DataAgent()
+   agent = da.DataAgent()
    ```
    
 
@@ -45,13 +45,14 @@ pip install .
     ```python
    agent.read_bag('/path/to/bagfile.mcap')
    ```
-   If there are multiple bag files to be processed, we can search for bag files in the specified folder and return a Python `dict` datatype containing a key `files` with as a list of the absolute bag file paths.
+   If there are multiple bag files to be processed, we can search for bag files in the specified folder and return a Python `dict` datatype containing a key `files` with a list of the bag file directories.
    ```python
-   file_list = agent.search_for_files(file_type='.mcap')
+   file_list = agent.search_for_files('/path/to/bag/files', file_type='.mcap')
    agent.read_bag(file_list[0]['files'])
    ```   
    If only bag files created on a specific date are to be read, the date can be passed as a string for the `date_tag` parameter. The date string should be in the format `DD/MM/YYYY`, and it assumes that the matching date is located in either the filename or the folder.
    ```python
+   agent.search_path = '/path/to/bag/files' # Setting the search path avoids passing it as a parameter
    file_list = agent.search_for_files(file_type='.mcap', date_tag=date)
    agent.read_bag(file_list[0]['files'])
    ``` 

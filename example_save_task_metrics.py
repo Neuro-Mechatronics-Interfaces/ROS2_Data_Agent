@@ -18,7 +18,7 @@
 
 import sys
 import time
-from data_utils import DataAgent, ArgParser
+from data_agent import DataAgent, ArgParser
 
 save = True 
 verbose = True

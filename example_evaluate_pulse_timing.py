@@ -1,10 +1,22 @@
+"""
+ Copyright 2024 Carnegie Mellon University Neuromechatronics Lab
+
+ This Source Code Form is subject to the terms of the Mozilla Public
+ License, v. 2.0. If a copy of the MPL was not distributed with this
+ file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+ Contact: Jonathan Shulgach (jshulgac@andrew.cmu.edu)
+
+ This script evaluates the sync trigger and robot position data from a previous experiment to show sampling consistency
+ """
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-filepath = '/home/nml/nml_nhp/nml_plexon-ros_workspace/data/231117_163448/Max_2023_11_17_4.h5'
-#filepath = '/home/nml/nml_nhp/nml_plexon-ros_workspace/data/231117_164353/Max_2023_11_17_5.h5'
-df = pd.read_hdf(filepath,'/data')
+# Assuming we have a data file from a previous experiment already converted from bag to .h5
+filepath = '/path/to/experiment/data.h5'
+df = pd.read_hdf(filepath, '/data')
 
 # Get events where only force data and pico events occured. Reset indexing
 #force_pico_df = df.loc[df.index[df['topic'].isin(['/robot/command/force','/pico/pulse_bit'])]]
@@ -30,7 +42,6 @@ plt.title('Robot Position [z]')
 plt.xlabel('Time (s)')
 plt.ylabel('m')
 plt.show()
-
 
 # Grab the next N events published to the ROS2 network starting from each pulse event
 i = 1

@@ -1,5 +1,5 @@
 """
- Copyright 2023 Carnegie Mellon University Neuromechatronics Lab
+ Copyright 2024 Carnegie Mellon University Neuromechatronics Lab
 
  This Source Code Form is subject to the terms of the Mozilla Public
  License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,8 +7,10 @@
 
  Contact: Jonathan Shulgach (jshulgac@andrew.cmu.edu)
 
- This script demonstrates the capabilities of the DataAgent class. In general, it looks for bag files 
- in a specified directory, collects and saves text files with key topic and matric data to a saving 
+ This script demonstrates the capabilities of the DataAgent class. It looks for any bag files
+ in a specified directory, collects and displays data with metrics data
+
+  to a saving
  directory, creates relevant subject and training day subfolders, and moves files from a local 
  path to a data server.
 

@@ -10,4 +10,5 @@ SEARCH_PATH=/path/to/data/directory
 SAVE_PATH=/new/generating/data/directory
 PARAM_PATH=/path/to/ROS2yaml/or/textFile
 NEW_PATH=/new/path/for/moving/data
+VERBOSE=False
 

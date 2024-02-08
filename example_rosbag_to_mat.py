@@ -1,5 +1,5 @@
 """
- Copyright 2023 Carnegie Mellon University Neuromechatronics Lab
+ Copyright 2024 Carnegie Mellon University Neuromechatronics Lab
 
  This Source Code Form is subject to the terms of the Mozilla Public
  License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -40,7 +40,7 @@ if __name__ == '__main__':
         # Save bag file data for that trial into an .mat file in the same folder
         file_name = rec['folder_path'] + "/{}_{}_{:02d}_{:02d}_rosbag_A_{}".format(SUBJECT, rec['year'], rec['month'], rec['day'], str(i))
 
-        agent.save_data(file_name,'mat')
+        agent.save_data(file_name, 'mat')
         print("done, next...")
             
     # And we are done!

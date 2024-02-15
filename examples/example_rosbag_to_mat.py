@@ -38,7 +38,7 @@ if __name__ == '__main__':
         agent.read_bag(rec['files'], combine=True)  # this step can take a few minutes to an hour...
 
         # Save bag file data for that trial into an .mat file in the same folder
-        file_name = rec['folder_path'] + "/{}_{}_{:02d}_{:02d}_rosbag_A_{}".format(SUBJECT, rec['year'], rec['month'], rec['day'], str(i))
+        file_name = rec['folder_path'] + "/{}_{}_{:02d}_{:02d}_rosbag_{}".format(SUBJECT, rec['year'], rec['month'], rec['day'], str(i))
 
         agent.save_data(file_name, 'mat')
         print("done, next...")

@@ -8,17 +8,19 @@
 
 import re
 import os
+import xlrd
 import glob
 import time
+import openpyxl
 import scipy.io as sio
 import shutil
 import datetime
-from openpyxl import load_workbook, Workbook
+from xlutils.filter import process, XLRDReader, XLWTWriter
 import pandas as pd
 import numpy as np
 
+from nml_bag.reader import Reader
 
-# from nml_bag.reader import Reader
 
 def save_as(df_file, folder_path, file_name):
     # Helper function to save files in a new directory
@@ -145,14 +147,94 @@ class ArgParser:
 
                     parsed_args[temp[0]] = val
                     if self.verbose:
-                        print("Assigning value '", val, "' to parameter '", temp[0], "'")
-
-            # Override parameters if found in args
-            # if self.args:
-            #     for i, arg in enumerate(self.args):
-            #         parsed_args[i] = arg
+                        print("Assigning value '", str(val), "' to parameter '", str(temp[0]), "'")
 
             return parsed_args
+
+
+def convert_digits_to_timestamp(str_number):
+    return '{}:{}:{}'.format(str_number[:2], str_number[2:4], str_number[4:])
+
+
+def parse_digits_from_string(string):
+    """ Internal parser function to extract the date, timestamp, and file block from a file name
+
+    Parameters:
+    ----------
+    string     : (str) string of filename
+
+    Returns:
+    ----------
+    date_str: (str) Reformatted string in the date format of 'm/d/yy'
+    filetag : (str) timestamp number associated with the file
+    block   : (str) File identifier number from the same timestamp recording
+    temp    : (str) last match from regular expression
+
+    """
+    temp = re.findall('(\d+)', string)
+    date_temp = temp[len(temp) - 2]
+    time_temp = temp[-1]
+    block = 0  # file index at the end
+    if len(temp[-1]) <= 2:
+        date_temp = temp[len(temp) - 3]
+        time_temp = temp[len(temp) - 2]
+        block = temp[-1]
+
+    dd = int(date_temp[4:6])
+    mm = int(date_temp[2:4])
+    yy = int(date_temp[:2])
+    date_str = str(mm) + "/" + str(dd) + "/" + str(yy)  # Convenient date format for reading
+    datetag = str(date_temp)  # Original 6-digit date format for string matching
+    filetag = str(time_temp)  # Original 6-digit time format for string matching
+
+    dt = datetime.date(yy, mm, dd)
+    year = '20' + str(dt.year)
+    month = dt.month
+    day = dt.day
+
+    return datetag, date_str, filetag, block, [year, month, day]
+
+
+def parse_datestring(string):
+    """ Internal parser function to convert a 6-digit date into date components
+
+    Parameters:
+    ----------
+    string     : (str) 6-digit date string
+
+    Returns:
+    ----------
+    list    : (list) List with date in [YYYY, MM, DD] format
+
+    """
+    temp = re.search('[0-9]{6}', string)
+    dt = datetime.date(int(temp[0][:2]), int(temp[0][2:4]), int(temp[0][4:6]))
+    year = '20' + str(dt.year)
+    month = dt.month
+    day = dt.day
+    return [year, month, day]
+
+
+def parse_str_date_info(string, year_format=None):
+    """ Internal parser function to extract the date from a file name
+
+    Parameters:
+    ----------
+    string     : (str) string of filename
+
+    Returns:
+    ----------
+    info_str: (str) Reformatted string in the generated_data folder date format
+    temp    : (str) last match from regular expression
+
+    """
+    temp = re.search('[0-9]{6}', string)
+    dd = int(temp[0][4:6])
+    mm = int(temp[0][2:4])
+    yy = int(temp[0][:2])
+    info_str = str(mm) + "/" + str(dd) + "/" + str(yy)
+
+    return info_str, temp.group()
 
 
 class DataAgent:
@@ -191,6 +273,9 @@ class DataAgent:
         self.date = []
         self._data = []
         self.notebook_headers = None
+        self.notebook_file = None
+        self.notebook_copy = None
+        self.notebook_style_list = None
 
         # Check that the paths exist
         if self.search_path:
@@ -264,9 +349,7 @@ class DataAgent:
             if self.verbose: print('Valid root directory')
             return data_path
         else:
-            print(
-                "Warning, path doesn't exist. Please fix path and retry, otherwise path will be set to 'None':\n\n{}".format(
-                    data_path))
+            print("Warning, path {} doesn't exist. Returning 'None':\n".format(data_path))
             return None
 
     def check_notebook_entry(self, table, date_str, headers, overwrite=False):
@@ -299,36 +382,180 @@ class DataAgent:
                             if self.verbose: print("Warning - {} already contains data. Skipping")
                             if not overwrite:
                                 skip[h] = True
-                if isinstance(table, Workbook):
-                    # Only supporting dataframes for now
+                elif isinstance(table, xlrd.book.Book):
                     pass
+                    # if header not in
+
+                # if isinstance(table, Workbook):
+                #    # Only supporting dataframes for now
+                #    pass
 
             return skip
 
-    def convert_digits_to_timestamp(self, str_number):
-        return '{}:{}:{}'.format(str_number[:2], str_number[2:4], str_number[4:])
+    def find_notebook_columns(self, headers, notebook_sheet=None, is_xlsx=True):
+        """ Function that searches a dataframe or Workbook object for the indices of the specified headers and
+        returns them. If a list of headers is passed, the function will return a list of indices for each header in
+        the list. If the header does not exist, the element will contain a -1
 
-    def get_notebook_data(self, animal, use_dataframe=True):
-        """ Access the notebook training data from the subjected specified
+        Parameters:
+        ----------
+        headers : (list) List of strings containing the header names to search for
+        notebook_sheet : (str) Name of the sheet in the workbook to search for the headers
+        is_xlsx : (bool) Option to specify if the workbook is in .xlsx format
 
-            TO-DO: auto-cycle through years
-            
+        Returns:
+        ----------
+        indices : (list) List of integers containing the indices of the headers in the dataframe or workbook object
+
         """
-        file_name = os.path.join(self.notebook_path, animal + '.xlsx')
-        d = None
-        w = None
-        # check that the notebook directory is valid
-        if not os.path.isfile(file_name):
-            print("Error - path not valid: {}".format(file_name))
-        else:
-            print("Found notebook '{}.xlsx'".format(animal))
-            if use_dataframe:
-                dfs = pd.read_excel(file_name, None)
-                d = dfs[list(dfs)[1]]  # Return notebook data for 2022
-            else:
-                d = load_workbook(filename=file_name, keep_vba=True)
+        if isinstance(self.notebook_file, pd.DataFrame):
+            return [self.notebook_file.columns.get_loc(header) for header in headers]
 
-        return d
+        elif isinstance(self.notebook_file, openpyxl.workbook.workbook.Workbook):
+            if notebook_sheet is None and self.notebook_sheet is None:
+                print(" - Warning - No sheet specified. Returning 'None'")
+                return None
+            elif notebook_sheet is None:
+                notebook_sheet = self.notebook_sheet
+
+            ws_hdrs = [cell.value for cell in self.notebook_file[notebook_sheet][1]]
+
+            # Remove spaces at the beginning and end of the header names in ws_hdrs
+            ws_hdrs = [header.strip() for header in ws_hdrs if header is not None]
+
+            # If header is in ws_headers save the index + 1 (to match 1-indexed excel format)
+            # If not, remember that, so headers will return only headers found in ws_hdrs and indices is the same length
+            indices = []
+            final_headers = []
+            for i, header in enumerate(headers):
+                if header in ws_hdrs:
+                    indices.append(ws_hdrs.index(header) + 1)
+                    final_headers.append(header)
+                else:
+                    print(" - Warning - {} not found in workbook".format(header))
+
+            return dict(zip(final_headers, indices))
+
+
+
+        elif isinstance(self.notebook_file, xlrd.book.Book):
+            if notebook_sheet is None and self.notebook_sheet is None:
+                print("Warning - No sheet specified. Returning 'None'")
+                return None
+            elif notebook_sheet is None:
+                notebook_sheet = self.notebook_sheet
+            return [self.notebook_file.sheet_by_name(notebook_sheet).row_values(0).index(header) for header in headers]
+
+        else:
+            print("Warning - Data type not recognized. Returning 'None'")
+            return None
+
+    def find_notebook_row(self, row_name, notebook_sheet=None):
+        """ Function that searches a dataframe or Workbook object for the row index of a row_name (usually a date in
+        the format of DD/MM/YY) and returns it. The first column contains dates in the same format as the row_name
+
+        Parameters
+        ----------
+        row_name : (str) String containing the row name to search for
+        notebook_sheet : (str) Name of the sheet in the workbook to search for the row
+
+        Returns
+        ----------
+        index : (int) Integer containing the index of the row in the dataframe or workbook object
+        """
+        if isinstance(self.notebook_file, pd.DataFrame):
+            return self.notebook_file.index[self.notebook_file[self.notebook_file.columns[0]] == row_name].tolist()[0]
+        elif isinstance(self.notebook_file, xlrd.book.Book):
+            if notebook_sheet is None and self.notebook_sheet is None:
+                print("Warning - No sheet specified. Returning 'None'")
+                return None
+            elif notebook_sheet is None:
+                notebook_sheet = self.notebook_sheet
+
+            split_date = row_name.split('/')
+            if split_date[0][0] == '0':  # Remove leading zero from day or month
+                split_date[0] = split_date[0][1]
+            if split_date[1][0] == '0':
+                split_date[1] = split_date[1][1]
+
+            return self.notebook_file.sheet_by_name(notebook_sheet).col_values(0).index(row_name)
+        elif isinstance(self.notebook_file, openpyxl.workbook.workbook.Workbook):
+            if notebook_sheet is None and self.notebook_sheet is None:
+                print("Warning - No sheet specified. Returning 'None'")
+                return None
+            elif notebook_sheet is None:
+                notebook_sheet = self.notebook_sheet
+
+            for row in self.notebook_file[notebook_sheet].iter_rows(min_col=1, max_col=1):
+                row_val = row[0].value
+                if isinstance(row_val, datetime.datetime):
+                    row_val = row_val.strftime('%m/%d/%y')
+
+                if row_val == row_name:
+                    return row[0].row
+
+        else:
+            print("Warning - Data type not recognized. Returning 'None'")
+            return None
+
+    def load_notebook(self, file_path, use_df=False, keep_formatting_info=True, return_notebook=False, is_xlsx=True):
+        """ Load a workbook file and return the data as a dataframe or workbook object
+
+        Parameters
+        ----------
+        file_path: (str) Absolute path to the workbook file
+        use_df: (bool) Option to return the data as a dataframe or workbook object
+        keep_formatting_info: (bool) Option to return the formatting information from the workbook
+        return_notebook: (bool) Option to return the workbook object
+
+        Returns
+        -------
+        notebook: (DataFrame, Book) pandas dataframe or book object containing the data from the loaded file
+        """
+        if not os.path.isfile(file_path):
+            print("Error - path not valid: {}".format(file_path))
+            return
+        else:
+            if self.verbose: print("Found notebook '{}'".format(file_path))
+        if use_df:
+            self.notebook_file = pd.read_excel(file_path, None)
+        else:
+            if is_xlsx:
+                self.notebook_file = openpyxl.load_workbook(file_path)
+            else:
+                self.notebook_file = xlrd.open_workbook(file_path, formatting_info=keep_formatting_info)
+
+        if False:
+            # Make a copy
+            if isinstance(self.notebook_file, xlrd.book.Book):
+                if self.notebook_copy is None:
+                    #  Copy the file
+                    w = XLWTWriter()
+                    process(XLRDReader(self.notebook_file, 'unknown.xls'), w)
+                    self.notebook_copy = w.output[0][1]
+                    self.notebook_style_list = w.style_list
+            elif isinstance(self.notebook_file, openpyxl.workbook.workbook.Workbook):
+                # Create a new workbook
+                self.notebook_copy = openpyxl.Workbook()
+
+                # Iterate through each sheet in the original workbook
+                for original_sheet in self.notebook_file.sheetnames:
+                    original_ws = self.notebook_file[original_sheet]
+                    new_ws = self.notebook_copy.create_sheet(title=original_sheet)
+
+                    # Iterate through each cell in the original sheet
+                    for row in original_ws.iter_rows(values_only=True):
+                        new_ws.append(row)
+
+                    # Copy styles from original to new workbook
+                    for row in range(1, original_ws.max_row + 1):
+                        for column in range(1, original_ws.max_column + 1):
+                            source_cell = original_ws.cell(row=row, column=column)
+                            target_cell = new_ws.cell(row=row, column=column)
+                            target_cell._style = source_cell._style
+
+        if return_notebook:
+            return self.notebook_file
 
     def get_cursor_pos(self, date, topic='/environment/cursor/position', save=False, file_type='txt', overwrite=False):
         """ Helper function that loads the cursor position data from a loaded bag file and stores it 
@@ -349,7 +576,8 @@ class DataAgent:
 
         if os.path.isfile(os.path.join(folder_path, file_name)):
             print(
-                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and resave".format(
+                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and "
+                "resave".format(
                     file_name, folder_path))
             return
 
@@ -380,7 +608,8 @@ class DataAgent:
         # print(os.path.join(folder_path, file_name))
         if os.path.isfile(os.path.join(folder_path, file_name)):
             print(
-                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and resave".format(
+                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and "
+                "resave".format(
                     file_name, folder_path))
             return
 
@@ -410,7 +639,8 @@ class DataAgent:
 
         if os.path.isfile(os.path.join(folder_path, file_name)):
             print(
-                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and resave".format(
+                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and "
+                "resave".format(
                     file_name, folder_path))
             return
 
@@ -439,7 +669,8 @@ class DataAgent:
         file_name = new_date + '_TARGETS.' + file_type
         if os.path.isfile(os.path.join(folder_path, file_name)):
             print(
-                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and resave".format(
+                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and "
+                "resave".format(
                     file_name, folder_path))
             return
 
@@ -469,8 +700,9 @@ class DataAgent:
         file_name_3 = new_date + '_FORCE_CURSOR.' + file_type
         if os.path.isfile(os.path.join(folder_path, file_name_1)):
             print(
-                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and resave".format(
-                    file_name, folder_path))
+                "File '{}' in directory '{}' already exists. Overwriting not supported. Please delete the file and "
+                "resave".format(
+                    file_name_1, folder_path))
             return
 
         print('Grabbing force data...\n')
@@ -480,88 +712,141 @@ class DataAgent:
 
         if save:
             print('Saving force data to:\n ' + (
-                        folder_path + new_date + '_FORCE_* custom topic extension:\n  "ROBOT_FEEDBACK"\n  "ROBOT_COMMAND"\n  "CURSOR\n")'))
+                    folder_path + new_date + '_FORCE_* custom topic extension:\n  "ROBOT_FEEDBACK"\n  '
+                                             '"ROBOT_COMMAND"\n  "CURSOR\n")'))
             save_as(f_robot_df_file, folder_path, file_name_1)
             save_as(f_cmd_df_file, folder_path, file_name_2)
             save_as(f_cursor_df_file, folder_path, file_name_3)
             print("Done")
 
-    def get_metrics(self, date, topic='/machine/state', save=False, file_type='txt', overwrite=False):
+    def get_metrics(self, date, data=None, state_topic='/machine/state', display_metrics=False, save=False,
+                    file_type='txt', overwrite=False, return_metrics=False):
         """ Saves the performance metrics of the loaded database in the directory specified as 
             a .txt file by default unless also specified
         
         Parameters
         ----------
-        date       : (str) String containing a date entry in the format of MM/DD/YY
-        file_type  : (str) Date type of the log file
-        verbose    : (bool) Verbose text option
-        save       : (bool) Option to save the data after loading 
-        overwrite  : (bool) Option to overwrite existing file
-        
+        date            : (str) String containing a date entry in the format of MM/DD/YY
+        state_topic           : (str) ROS2 topic containing the information
+        data            : (DataFrame) Optional Dataframe containing the loaded data
+        file_type       : (str) Date type of the log file
+        save            : (bool) Option to save the data after loading
+        overwrite       : (bool) Option to overwrite existing file
+        display_metrics : (bool) Option to display the metrics on the screen
+        return_metrics  : (bool) Option to return the metrics as a dictionary
+
         """
+        if data is not None and isinstance(data, pd.DataFrame):
+            self._data = data
 
         [folder_path, new_date] = self.build_path(date)
         file_name = new_date + '_PERFORMANCE_METRICS.' + file_type
 
         if os.path.isfile(os.path.join(folder_path, file_name)) and not overwrite:
-            print(
-                "File '{}' in directory '{}' already exists and overwriting set to False. Please set overwrite to True or delete the file".format(
-                    file_name, folder_path))
+            print("File '{}' in directory '{}' already exists and overwriting set to False. Please set overwrite to "
+                  "True or delete the file".format(file_name, folder_path))
             return
 
-        print(' | Grabbing performance metrics...')
-        [N_trials, N_success, N_failure] = self.get_trial_performance(topic)
-        avg_trial_t = self.get_mean_trial_time(topic)
-        if N_trials is None:
+        # Get TOTAL TRIALS, CORRECT TRIALS, START TIME, TIME WORKED
+        print('Grabbing performance metrics...')
+        trial_perf = self.get_trial_performance(state_topic)
+        avg_trial_t = self.get_mean_trial_time(state_topic)
+        if trial_perf['TOTAL TRIALS'] is None:
             print(" | Failed to get performance metrics")
             return
 
-        # Display the trial perfoemance metrics on screen
-        # if self.verbose or verbose:
-        if True:
-            print("[{}] Performance metrics:\n\n".format(new_date))
-            print("Total number of trials: {}".format(N_trials))
-            print("Correct trials:         {}".format(N_success))
-            print("Percentage correct:     {:.1f}".format(100 * N_success / N_trials))
+        # Get START TIME and TIME WORKED
+        time_ns = self._data['time_ns']
+        # START_TIME = time.strftime('%Y-%m-%d %H:%M:%S.%f', time.localtime(time_ns.iloc[0] / 1e9))
+        t = datetime.datetime.utcfromtimestamp(time_ns.iloc[0] / 1e9)
+        START_TIME = t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
-        # Decided to add paramters to metrics file, don't need to make new file to parse yet
+        # Get the number of minutes that passed between the first and last time_ns
+        TIME_WORKED = (time_ns.iloc[-1] - time_ns.iloc[0]) / 1e9 / 60
+
+        # Decided to add parameters to metrics file, don't need to make new file to parse yet
         if not self.param_path:
-            print(
-                'Warning - Parameter file path not set. USe the add_param_path() function with the directory holding your parameter files.')
+            print('Warning - Parameter file path not set. USe the add_param_path() function with the directory holding '
+                  'your parameter files.')
         else:
             n_targets = self.get_param_from_file(self.param_path, 'n_targets')
             target_r = self.get_param_from_file(self.param_path, ['target', 'radius'])
             cursor_r = self.get_param_from_file(self.param_path, ['cursor', 'radius'])
             # enforce_orient = self.get_param_from_file(self.param_path, 'enforce_orientation')
 
+        # Display the trial performance metrics on screen
+        if display_metrics:
+            print("=======================================")
+            print("[{}] Performance metrics:\n".format(new_date))
+            print("Total number of trials: {}".format(trial_perf['TOTAL TRIALS']))
+            print("Correct trials:         {}".format(trial_perf['CORRECT TRIALS']))
+            print("Percentage correct:     {:.1f}".format(
+                100 * trial_perf['CORRECT TRIALS'] / trial_perf['TOTAL TRIALS']))
+            print("Average trial time:     {:.2f} s".format(avg_trial_t))
+            print("Start time:             {}".format(START_TIME))
+            print("Time worked:            {:.2f} minutes".format(TIME_WORKED))
+            print("=======================================")
+
         if save:
-            print('Saving metrics data to ' + (folder_path + file_name))
-            with open((folder_path + file_name), "a") as f:
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
+
+            print('Saving metrics data to "' + (folder_path + file_name) + '"')
+            with open((folder_path + file_name), "w") as f:
 
                 # ===== Add any metadata information you want to save here ========
-                msg = new_date + ",N:" + str(N_trials) + ",Success:" + str(N_success) + ",Failure:" + str(
-                    N_failure) + ",Success_Rate:" + str(100 * N_success / N_trials) + "\n"
+                msg = new_date + ",N:" + str(trial_perf['TOTAL TRIALS']) + ",Success:" + str(
+                    trial_perf['CORRECT TRIALS']) + ",Failure:" + str(
+                    trial_perf['TOTAL TRIALS'] - trial_perf['CORRECT TRIALS']) + ",Success_Rate:" + str(
+                    100 * trial_perf['CORRECT TRIALS'] / trial_perf['TOTAL TRIALS']) + "\n"
                 f.write(msg)
+                f.write('START_TIME:' + START_TIME + "\n")
+                f.write('TIME_WORKED:' + str(TIME_WORKED) + "\n")
 
                 if avg_trial_t is not None:
                     f.write('MEAN_TRIAL_T:' + str(avg_trial_t) + "\n")
 
-                if n_targets is not None:
-                    f.write('N_TARGETS:' + n_targets + "\n")
+                if self.param_path:
+                    if n_targets is not None:
+                        f.write('N_TARGETS:' + n_targets + "\n")
+                    if target_r is not None:
+                        f.write('TARGET_RADIUS:' + target_r + "\n")
+                    if cursor_r is not None:
+                        f.write('CURSOR_RADIUS:' + cursor_r + "\n")
+                    # if enforce_orient is not None:
+                    #    f.write('ENFORCE_ORIENTATION:' + enforce_orient + "\n"
 
-                if target_r is not None:
-                    f.write('TARGET_RADIUS:' + target_r + "\n")
-
-                if cursor_r is not None:
-                    f.write('CURSOR_RADIUS:' + cursor_r + "\n")
-
-                # if enforce_orient is not None:
-                #    f.write('ENFORCE_ORIENTATION:' + enforce_orient + "\n"
-
-                # =================================================================
                 f.close()
 
-            print("Done")
+            if return_metrics:
+                # 'LIQUID EARNED', 'FREE WATER', 'TOTAL TRIALS', 'CORRECT TRIALS', 'START TIME', 'TIME WORKED'
+                # Note: these have to match the header names in the notebook file
+                data = {'TOTAL TRIALS': trial_perf['TOTAL TRIALS'],
+                        'CORRECT TRIALS': trial_perf['CORRECT TRIALS'],
+                        'PERCENT CORRECT': "{:.1f}".format(
+                            100 * trial_perf['CORRECT TRIALS'] / trial_perf['TOTAL TRIALS']),
+                        'AVERAGE TRIAL TIME': "{:.1f}".format(trial_perf['AVERAGE TRIAL TIME']),
+                        'START TIME': START_TIME,
+                        'TIME WORKED (mins)': "{:.1f}".format(TIME_WORKED),
+                        'PRIMARY TARGET MOVE ERROR': trial_perf['PRIMARY TARGET MOVE ERROR'],
+                        'PRIMARY TARGET OVERSHOOT': trial_perf['PRIMARY TARGET OVERSHOOT'],
+                        'PRIMARY TARGET OVERSHOOT ERROR': trial_perf['PRIMARY TARGET OVERSHOOT ERROR'],
+                        'SECONDARY TARGET INSTRUCTION ERROR': trial_perf['SECONDARY TARGET INSTRUCTION ERROR'],
+                        'SECONDARY TARGET MOVE ERROR': trial_perf['SECONDARY TARGET MOVE ERROR'],
+                        'SECONDARY TARGET OVERSHOOT': trial_perf['SECONDARY TARGET OVERSHOOT'],
+                        'SECONDARY TARGET OVERSHOOT ERROR': trial_perf['SECONDARY TARGET OVERSHOOT ERROR'],
+                        'PRIMARY TARGET RETURN INSTRUCTION ERROR': trial_perf['PRIMARY TARGET RETURN INSTRUCTION ERROR'],
+                        'PRIMARY TARGET RETURN MOVE ERROR': trial_perf['PRIMARY TARGET RETURN MOVE ERROR'],
+                        'PRIMARY TARGET RETURN OVERSHOOT': trial_perf['PRIMARY TARGET RETURN OVERSHOOT'],
+                        'PRIMARY TARGET RETURN OVERSHOOT ERROR': trial_perf['PRIMARY TARGET RETURN OVERSHOOT ERROR'],
+                        'SUCCESS WITH OVERSHOOT': trial_perf['SUCCESS WITH OVERSHOOT'],
+                        }
+                if self.param_path:
+                    data['N_TARGETS'] = n_targets
+                    data['TARGET_RADIUS'] = target_r
+                    data['CURSOR_RADIUS'] = cursor_r
+                    # data['ENFORCE_ORIENTATION'] = enforce_orient
+                return data
 
     def get_param_from_file(self, param_path=None, param_name=None, file_type='yaml'):
         """ Checks directory for config files in .yaml format, searches for the specified 
@@ -631,57 +916,193 @@ class DataAgent:
         
         """
 
-        if not type(topic) == str:
+        if not isinstance(topic, str):
             print("Warning: topic input must be string")
             return None
 
-        parsed_topic_data = []
-        print("Searching for '{}' topic data...00%".format(topic), end="")
+        # Check that the first character in the topic starts with a '/'
+        if topic[0] != '/':
+            topic = '/' + topic
+
+        if self.verbose:
+            print("Searching for '{}' topic data...00%".format(topic), end="")
         # print("\b\b\b{:02d}%".format(val), end="")
-        for i, reader in enumerate(self._data):
+        # for i, reader in enumerate(self._data):
+        # print("\b\b\b{:02d}%".format(int(100 * (i + 1) / (len(self._data) + 1))))
 
-            print("\b\b\b{:02d}%".format(int(100 * (i + 1) / (len(self._data) + 1))))
-            for el in reader.records:
-                if el['topic'] == topic:
-                    parsed_topic_data.append(el)
-            if len(parsed_topic_data) == 0:
-                print("Warning, topic '{}' not found in bag file, Stopping search.".format(topic))
-                return None
-
-        print("\b\b\b\bDone\n=======================================================")
+        # Return each row in the dataframe where the contents of the 'topic' column match the topic input
         parsed_topic_df = None
-        if len(parsed_topic_data) > 0:
-            parsed_topic_df = pd.DataFrame(parsed_topic_data)
-            if self.verbose:
-                print(parsed_topic_df)
-            return parsed_topic_df
+        if 'topic' not in self._data.columns:
+            print("Warning, topic '{}' not found in bag file, Stopping search.".format(topic))
         else:
-            print("Warning: Could not find the topic '{}' in the loaded files. Check topic spelling".format(topic))
-            return None
+            parsed_topic_df = self._data.loc[self._data['topic'] == topic]
 
-    def get_trial_performance(self, topic='/machine/state'):
+        if self.verbose:
+            print("\b\b\bDone")
+
+        return parsed_topic_df
+
+    def get_trial_performance(self, state_topic='/machine/state'):
         """ Helper function that gets the task performance statistics. Reads the state topic to 
             evaluate performance (default: /a\machine/state)
         
         Parameters:
         -----------
-        topic     : (str) The ROS2 topic to read task states
+        state_topic     : (str) The ROS2 topic to read task states
 
         Returns
         ---------
-        N_trials  : (int) total trials from success and failure combined states
-        N_success : (int) total success states
-        N_failure : (int) total failure states
+        data  : (dict) Dictionary containing the performance metrics. The full list of metrics is:
+                - CORRECT TRIALS
+                - INCORRECT TRIALS
+                - TOTAL TRIALS
+                - AVERAGE TRIAL TIME
         
         """
-        df = self.get_topic_data(topic)
-        if df is not None:
-            n_success = len(df[df['data'] == 'success'])
-            n_failure = len(df[df['data'] == 'failure'])
-            n_trials = n_success + n_failure
-            return n_trials, n_success, n_failure
-        else:
-            return None, None, None
+        state_df = self.get_topic_data(state_topic)
+
+        # Remove duplicate states
+        prev_state = None
+        duplicates_to_ignore = ['intertrial', 'move_a']
+        for idx, row in state_df.iterrows():
+            current_state = row['data']
+            if current_state == prev_state and current_state in duplicates_to_ignore:
+                state_df.at[idx, 'data'] = ''
+            prev_state = current_state
+
+        # Removing empty strings results in duplicate states removed
+        state_df = state_df[state_df['data'] != '']
+
+        # Reset indices
+        state_df.reset_index(drop=True, inplace=True)
+
+        # Getting some state indices
+        success_idx_list = state_df.index[state_df['data'] == 'success']
+        failure_idx_list = state_df.index[state_df['data'] == 'failure']
+        move_a_idx_list = state_df.index[state_df['data'] == 'move_a']
+        move_b_idx_list = state_df.index[state_df['data'] == 'move_b']
+        move_c_idx_list = state_df.index[state_df['data'] == 'move_c']
+        hold_a_idx_list = state_df.index[state_df['data'] == 'hold_a']
+        hold_b_idx_list = state_df.index[state_df['data'] == 'hold_b']
+        hold_c_idx_list = state_df.index[state_df['data'] == 'hold_c']
+        intertrial_idx_list = state_df.index[state_df['data'] == 'intertrial']
+        overshoot_a_idx_list = state_df.index[state_df['data'] == 'overshoot_a']
+        overshoot_b_idx_list = state_df.index[state_df['data'] == 'overshoot_b']
+        overshoot_c_idx_list = state_df.index[state_df['data'] == 'overshoot_c']
+        delay_a_idx_list = state_df.index[state_df['data'] == 'delay_a']
+        delay_b_idx_list = state_df.index[state_df['data'] == 'delay_b']
+        delay_c_idx_list = state_df.index[state_df['data'] == 'delay_c']
+
+        # Begin collecting metrics
+        data = {}
+        if state_df is not None:
+            # CORRECT TRIALS is the total number of success states in the data
+            data['CORRECT TRIALS'] = len(state_df[state_df['data'] == 'success'])
+
+            # INCORRECT TRIALS is the total number of failure states in the data
+            data['INCORRECT TRIALS'] = len(state_df[state_df['data'] == 'failure'])
+
+            # TOTAL TRIALS is the sum of correct and incorrect trials
+            data['TOTAL TRIALS'] = data['CORRECT TRIALS'] + data['INCORRECT TRIALS']
+
+            # SUCCESS WITH OVERSHOOT is the number of trial periods between the move_a and success states where an
+            # overshoot state is present. We can find this while getting the average trial time
+            data['SUCCESS WITH OVERSHOOT'] = 0
+            # AVERAGE TRIAL TIME is the average time difference between the move_a state and following success state
+            time_diff = []
+            for success_idx in success_idx_list:
+                prev_move_a_idx = [x for x in move_a_idx_list if x < success_idx][-1]
+                if prev_move_a_idx is not None:
+                    t_1 = convert_to_utc(state_df.loc[prev_move_a_idx, 'time_ns'])
+                    t_0 = convert_to_utc(state_df.loc[success_idx, 'time_ns'])
+                    time_diff.append(t_0 - t_1)
+
+                    # While we have this period, check if the "overshoot_a", "overshoot_b", or "overshoot_c" states
+                    # are present between these indices
+                    if len(overshoot_a_idx_list) > 0:
+                        for i in range(len(overshoot_a_idx_list)):
+                            if prev_move_a_idx < overshoot_a_idx_list[i] < success_idx:
+                                data['SUCCESS WITH OVERSHOOT'] += 1
+                    if len(overshoot_b_idx_list) > 0:
+                        for i in range(len(overshoot_b_idx_list)):
+                            if prev_move_a_idx < overshoot_b_idx_list[i] < success_idx:
+                                data['SUCCESS WITH OVERSHOOT'] += 1
+                    if len(overshoot_c_idx_list) > 0:
+                        for i in range(len(overshoot_c_idx_list)):
+                            if prev_move_a_idx < overshoot_c_idx_list[i] < success_idx:
+                                data['SUCCESS WITH OVERSHOOT'] += 1
+
+            time_diff = [x for x in time_diff if x <= 10]  # Remove values greater than 10 seconds
+            if len(time_diff) > 1:
+                data['AVERAGE TRIAL TIME'] = np.mean(time_diff)
+
+            # PRIMARY TARGET MOVE ERROR is the number of times the next state after move_a is failure
+            data['PRIMARY TARGET MOVE ERROR'] = 0
+            for i in range(1, len(failure_idx_list)):
+                if state_df['data'].iloc[failure_idx_list[i] - 1] == "move_a":
+                    data['PRIMARY TARGET MOVE ERROR'] += 1
+
+            # PRIMARY TARGET OVERSHOOT ERROR is the number of times the next state after hold_a is overshoot_a
+            data['PRIMARY TARGET OVERSHOOT'] = 0
+            for i in range(1, len(overshoot_a_idx_list)):
+                if state_df['data'].iloc[overshoot_a_idx_list[i] - 1] == "hold_a":
+                    data['PRIMARY TARGET OVERSHOOT'] += 1
+
+            # SECONDARY TARGET INSTRUCTION ERROR is the number of times the next state after delay_a is failure
+            data['SECONDARY TARGET INSTRUCTION ERROR'] = 0
+            for i in range(1, len(failure_idx_list)):
+                if state_df['data'].iloc[failure_idx_list[i] - 1] == "delay_a":
+                    data['SECONDARY TARGET INSTRUCTION ERROR'] += 1
+
+            # PRIMARY TARGET OVERSHOOT ERROR is the number of times the next state after overshoot_a is error
+            data['PRIMARY TARGET OVERSHOOT ERROR'] = 0
+            for i in range(1, len(failure_idx_list)):
+                if state_df['data'].iloc[failure_idx_list[i] - 1] == "overshoot_a":
+                    data['PRIMARY TARGET OVERSHOOT ERROR'] += 1
+
+            # SECONDARY TARGET MOVE ERROR is the number of times the next state after move_b is failure
+            data['SECONDARY TARGET MOVE ERROR'] = 0
+            for i in range(1, len(failure_idx_list)):
+                if state_df['data'].iloc[failure_idx_list[i] - 1] == "move_b":
+                    data['SECONDARY TARGET MOVE ERROR'] += 1
+
+            # SECONDARY TARGET OVERSHOOT is the number of times the next state after hold_b is overshoot_b
+            data['SECONDARY TARGET OVERSHOOT'] = 0
+            for i in range(1, len(overshoot_b_idx_list)):
+                if state_df['data'].iloc[overshoot_b_idx_list[i] - 1] == "hold_b":
+                    data['SECONDARY TARGET OVERSHOOT'] += 1
+
+            # PRIMARY TARGET RETURN INSTRUCTION ERROR is the number of times the next state after delay_b is failure
+            data['PRIMARY TARGET RETURN INSTRUCTION ERROR'] = 0
+            for i in range(1, len(failure_idx_list)):
+                if state_df['data'].iloc[failure_idx_list[i] - 1] == "delay_b":
+                    data['PRIMARY TARGET RETURN INSTRUCTION ERROR'] += 1
+
+            # SECONDARY TARGET OVERSHOOT ERROR is the number of times the next state after overshoot_b is error
+            data['SECONDARY TARGET OVERSHOOT ERROR'] = 0
+            for i in range(1, len(failure_idx_list)):
+                if state_df['data'].iloc[failure_idx_list[i] - 1] == "overshoot_b":
+                    data['SECONDARY TARGET OVERSHOOT ERROR'] += 1
+
+            # PRIMARY TARGET RETURN MOVE ERROR is the number of times the next state after move_c is failure
+            data['PRIMARY TARGET RETURN MOVE ERROR'] = 0
+            for i in range(1, len(failure_idx_list)):
+                if state_df['data'].iloc[failure_idx_list[i] - 1] == "move_c":
+                    data['PRIMARY TARGET RETURN MOVE ERROR'] += 1
+
+            # PRIMARY TARGET RETURN OVERSHOOT is the number of times the next state after hold_c is overshoot_c
+            data['PRIMARY TARGET RETURN OVERSHOOT'] = 0
+            for i in range(1, len(overshoot_c_idx_list)):
+                if state_df['data'].iloc[overshoot_c_idx_list[i] - 1] == "hold_c":
+                    data['PRIMARY TARGET RETURN OVERSHOOT'] += 1
+
+            # PRIMARY TARGET RETURN OVERSHOOT ERROR is the number of times the next state after overshoot_c is error
+            data['PRIMARY TARGET RETURN OVERSHOOT ERROR'] = 0
+            for i in range(1, len(failure_idx_list)):
+                if state_df['data'].iloc[failure_idx_list[i] - 1] == "overshoot_c":
+                    data['PRIMARY TARGET RETURN OVERSHOOT ERROR'] += 1
+
+        return data
 
     def get_mean_trial_time(self, topic='task/state', start_state='move_a'):
         """ Function that finds the average duration of trials from the task state changes
@@ -765,77 +1186,6 @@ class DataAgent:
         print("Sorted files with most consecutive keys")
         return parsed_data
 
-    def parse_digits_from_string(self, string):
-        """ Internal parser function to extract the date, timestamp, and file block from a file name
-
-        Parameters:
-        ----------
-        string     : (str) string of filename
-                        
-        Returns:
-        ----------
-        date_str: (str) Reformatted string in the date format of 'm/d/yy'
-        filetag : (str) timestamp number associated with the file
-        block   : (str) File identifier number from the same timestamp recording
-        temp    : (str) last match from regular expression 
-                               
-        """
-        temp = re.findall('(\d+)', string)
-        dd = int(temp[0][4:6])
-        mm = int(temp[0][2:4])
-        yy = int(temp[0][:2])
-        date_str = str(mm) + "/" + str(dd) + "/" + str(yy)  # Covenient date format for reading
-        datetag = str(temp[0])  # Original 6-digit date format for string matching
-        filetag = str(temp[1])  # Original 6-digit time format for string matching
-        block = temp[-1]  # file index at the end
-
-        dt = datetime.date(yy, mm, dd)
-        year = '20' + str(dt.year)
-        month = dt.month
-        day = dt.day
-
-        return datetag, date_str, filetag, block, [year, month, day]
-
-    def parse_datestring(self, string):
-        """ Internal parser function to convert a 6-digit date into date components
-
-        Parameters:
-        ----------
-        string     : (str) 6-digit date string
-                        
-        Returns:
-        ----------
-        list    : (list) List with date in [YYYY, MM, DD] format 
-                               
-        """
-        temp = re.search('[0-9]{6}', string)
-        dt = datetime.date(int(temp[0][:2]), int(temp[0][2:4]), int(temp[0][4:6]))
-        year = '20' + str(dt.year)
-        month = dt.month
-        day = dt.day
-        return [year, month, day]
-
-    def parse_str_date_info(self, string, year_format=None):
-        """ Internal parser function to extract the date from a file name
-
-        Parameters:
-        ----------
-        string     : (str) string of filename
-                        
-        Returns:
-        ----------
-        info_str: (str) Reformatted string in the generated_data folder date format
-        temp    : (str) last match from regular expression 
-                               
-        """
-        temp = re.search('[0-9]{6}', string)
-        dd = int(temp[0][4:6])
-        mm = int(temp[0][2:4])
-        yy = int(temp[0][:2])
-        info_str = str(mm) + "/" + str(dd) + "/" + str(yy)
-
-        return info_str, temp.group()
-
     def parse_ros2_topics(self, df):
         """ Reads a DataFrame and returns a Python dictionary with topics as keys and the 
         correspinding data type in the values associated with that key. This shrinks down the df 
@@ -886,13 +1236,10 @@ class DataAgent:
 
         start_time = df['time_ns'].iloc[0]
 
-        ros2_dict = {}
-        ros2_dict['info'] = '.mat file created using DataAgent'
-        ros2_dict['topics'] = []
-        ros2_dict['samples'] = []
-        ros2_dict['sample_rate'] = 'Check the samples field for sample rates of data channels'
-        ros2_dict['start_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time / 1e9))
-        ros2_dict['file_modified'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        ros2_dict = {'info': '.mat file created using DataAgent', 'topics': [], 'samples': [],
+                     'sample_rate': 'Check the samples field for sample rates of data channels',
+                     'start_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time / 1e9)),
+                     'file_modified': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}
 
         date = time.strftime('%Y_%m_%d', time.localtime(start_time / 1e9))
         ros2_dict['name'] = "{}_{}_rosbag_A_0".format(self.subject, date)
@@ -903,12 +1250,9 @@ class DataAgent:
             topic_df = df.loc[df.index[df['topic'].isin([topic])]]
 
             # Get start time datestamp , timestamp, and ROS2 topic data type
-            temp = {'type': str(topic_df['type'].iloc[0])}
-            temp['topic'] = topic
+            temp = {'type': str(topic_df['type'].iloc[0]), 'topic': topic, 'time_index': topic_df['time_ns'].to_list(),
+                    'time_s': ((topic_df['time_ns'] - start_time) / 1e9).to_list(), 'n_samples': len(topic_df)}
             # temp['start_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time/1e9))
-            temp['time_index'] = topic_df['time_ns'].to_list()
-            temp['time_s'] = ((topic_df['time_ns'] - start_time) / 1e9).to_list()
-            temp['n_samples'] = len(topic_df)
             temp['sample_rate'] = 1 / np.mean(np.diff(temp['time_s']))
 
             # Find the sub data types associated with the ros2 topic            
@@ -954,13 +1298,12 @@ class DataAgent:
         ft = self.file_type
         if ft == '.db3' or ft == 'db3' or ft == 'sqlite3':
             storage_id = 'sqlite3'
-            # storage_id = 'mcap'
         elif ft == '.mcap' or ft == 'mcap':
             storage_id = 'mcap'
 
-        if type(file_path) == str:
+        if isinstance(file_path, str):
             files = [file_path]
-        elif type(file_path) == list:
+        elif isinstance(file_path, list):
             files = file_path
         else:
             print('Error - Be sure to pass a string directory or list of string directories')
@@ -988,17 +1331,20 @@ class DataAgent:
         if combine:
             self._data = main_df
 
-    def save_as_mat(self, file_name, df):
+    def save_as_mat(self, file_path, df):
         """ Helper function to save the dataframe as a .mat file
+
+        Parameters:
+        ----------
+        file_path : (str) File path to save the data to including the file name
+        df        : (DataFrame) DataFrame object to save as a .mat file
         
         """
-        file_path = file_name + ".mat"
-        # file_path = "myfile.mat"
+        if file_path[-4:] != '.mat':
+            file_path = file_path + ".mat"
+
         print("Saving mat file to '{}'".format(file_path))
-        # data = {name: col.values for name, col in df.items()}
-
         ros_dict = self.parse_ros2_topics(df)
-
         sio.savemat(file_path, ros_dict)
 
     def save_as_htf5(self, df, file_name):
@@ -1104,7 +1450,7 @@ class DataAgent:
 
                 # If Specific date was requested, only collect files with matching date
                 if date_tag:
-                    date_match, _ = self.parse_str_date_info(folder)
+                    date_match, _ = parse_str_date_info(folder)
                     if date_match != date_tag:
                         continue
 
@@ -1121,11 +1467,11 @@ class DataAgent:
                     for f in data['files']:
                         if self.verbose: print("|    '{}'".format(f))
                         data['date_tag'], data['date'], data[
-                            'file_tag'], block, date_info = self.parse_digits_from_string(f)
+                            'file_tag'], block, date_info = parse_digits_from_string(f)
                         data['year'], data['month'], data['day'] = date_info
                         data['block'].append(
                             int(block))  # Add the block number to the list, easiest way to keep track of files
-                        data['timestamp'] = self.convert_digits_to_timestamp(
+                        data['timestamp'] = convert_digits_to_timestamp(
                             data['file_tag'])  # Convert time into HH:MM:SS
                 else:
                     print("No files ending in' {}' found in '{}'".format(self.file_type, data['folder_path']))
@@ -1138,25 +1484,30 @@ class DataAgent:
                 if self.verbose:
                     print("\n folder metadata: ")
                     for m in data:
-                        print("|  {}: {}".format(m, data[m]))
+                        print("|   {}:".format(m))
+                        if isinstance(data[m], list):
+                            for j in data[m]:
+                                print("|   |   {}".format(j))
+                        else:
+                            print("|   |   {}".format(data[m]))
 
                 # Add folder data to data list
                 metadata.append(data)
 
-
         # Local bag files in the search directory
         elif len(items[0][2]) > 0:
+            data = {}
             file_search_path = str(self.search_path) + "/*" + str(self.file_type)
             data['files'] = glob.glob(file_search_path)
             if len(data['files']) > 0:
                 data['block'] = []
                 for f in data['files']:
                     if self.verbose: print("|    '{}'".format(f))
-                    data['date_tag'], data['date'], data['file_tag'], block, date_info = self.parse_digits_from_string(
+                    data['date_tag'], data['date'], data['file_tag'], block, date_info = parse_digits_from_string(
                         f)
                     data['year'], data['month'], data['day'] = date_info
                     data['block'].append(int(block))
-                    data['timestamp'] = self.convert_digits_to_timestamp(data['file_tag'])
+                    data['timestamp'] = convert_digits_to_timestamp(data['file_tag'])
                     data['file_type'] = self.file_type
                     data['block'] = sorted(data['block'])
 
@@ -1217,8 +1568,16 @@ class DataAgent:
         sorted_list = sorted(file_list, key=lambda x: x[key], reverse=descending)
         return sorted_list
 
-    def save_file(self, f, folder_path, file_name, overwrite=False, default_file_type='txt'):
+    def save_file(self, df_file, folder_path, file_name, overwrite=False, default_file_type='txt'):
         """ Helper function that saves the file to the specific folder path
+
+        Parameters:
+        -----------
+        df_file           : (DataFrame) Dataframe object to save
+        folder_path       : (str) directory to save the file
+        file_name         : (str) name of the file to save
+        overwrite         : (bool) Option to overwrite the file if it already exists
+        default_file_type : (str) Default file type to save as if not specified
         """
 
         # Check if file_name already has file type, if not use default
@@ -1234,10 +1593,29 @@ class DataAgent:
             print('Saving data to:\n ' + (folder_path + file_name))
             save_as(df_file, folder_path, file_name)
 
+    def save_notebook(self, file_path, overwrite=False):
+        """ Saves the loaded notebook to a specified file path
+
+        Parameters:
+        -----------
+        file_name : (str) Name of the file to save
+        file_path : (str) Directory to save the file
+        overwrite : (bool) Option to overwrite the file if it already exists
+
+        """
+
+        if not os.path.exists(file_path):
+            print("Error - Please enter a valid file path")
+        else:
+            if not overwrite:
+                print('{} already in path. Set enable to True if you would like to save a new file'.format(file_path))
+            else:
+                print('Saving notebook to: "' + file_path + '"')
+                self.notebook_file.save(file_path)
+
     def transfer_data(self, files=None, new_path=None, tag=None, move_parent_folder=False):
         """ Function that moves the files defined as filepath strings to a new directory.
-         
-        
+
         Parameters:
         -----------
         files              : (str/list) Filepath string or list of filepath strings to move, can be 
@@ -1345,22 +1723,60 @@ class DataAgent:
             if self.verbose:
                 print("Moving file:\n | Original path: {}\n | New path {}".format(file_, transfer_path))
 
-            # Using the 'shutil.move()' method throws two error messages: [Errno 18, Errno 95] 
+            # If not sudo, using the 'shutil.move()' method throws two error messages: [Errno 18, Errno 95]
             try:
                 if os.path.isdir(transfer_path):
-                    print(
-                        "About to delete directory in 60 seconds. Check that the folder has been successfully transfered")
+                    print("Deleting directory in 60 seconds. Make sure the folder has been successfully transferred")
                     time.sleep(60)
                     shutil.move(os.path.realpath(file_), transfer_path)
-            except e:
+            except Exception as e:
                 print(e)
+                print("Error - Could not move file to new directory")
 
-    def update_notebook(self, nb_df, date_str, data):
-        """ Updates the dataframe with the new data specified by the date and header name
+    def write_to_sheet(self, sheet_name, rowx, colx, value):
+        """ Helper function to write to a specific cell in the sheet
+
+        Parameters:
+        -----------
+        sheet_name : (str) Name of the sheet to write to
+        rowx       : (int) Row index to write to
+        colx       : (int) Column index to write to
+        value      : (str) Value to write to the cell
         """
-        for header in data:
-            # index of date
-            date_idx = nb_df.index[nb_df[nb_df.columns[0]] == date_str].tolist()[0]
-            nb_df.loc[date_idx, header] = data[header]  # replace date,header index with new value
+        if self.verbose:
+            print(" - Writing {} to sheet '{}' at row {}, column {}".format(value, sheet_name, rowx, colx))
+        if isinstance(self.notebook_file, xlrd.book.Book):
+            ref_sheet = self.notebook_file.sheet_by_name(sheet_name)
+            xf_index = ref_sheet.cell_xf_index(rowx, colx)
+            # wtsheet = self.get_sheet_by_name(self.notebook_copy, sheet_name)
+            wtsheet = self.get_sheet_by_name(self.notebook_file, sheet_name)
+            wtsheet.write(rowx, colx, value, self.notebook_style_list[xf_index])
 
-        return nb_df
+        elif isinstance(self.notebook_file, openpyxl.workbook.workbook.Workbook):
+            wksheet = self.notebook_file[sheet_name]
+            # wksheet = self.notebook_copy[sheet_name]
+            try:
+                wksheet.cell(row=rowx, column=colx, value=value)
+            except Exception as e:
+                print(" - Error writing to sheet: {}. Please make sure that header name exists".format(e))
+
+    def get_sheet_by_name(self, book, name):
+        """Helper function to get a sheet by name from xlwt.Workbook, a strangely missing method.
+
+        Parameters:
+        -----------
+        book : (xlwt.Workbook) The workbook to search
+        name : (str) The name of the sheet to get
+
+        Return:
+        --------
+        sheet or None if no sheet with the given name is present.
+        """
+        # Note, we have to use exceptions for flow control because the
+        # xlwt API is broken and gives us no other choice.
+        try:
+            for sheet in book._Workbook__worksheets:
+                if sheet.name == name:
+                    return sheet
+        except IndexError:
+            return None

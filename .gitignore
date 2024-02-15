@@ -1,5 +1,10 @@
 venv/
 .idea/
 data/
+temp/
 __pycache__/
+nml_bag/
 nml_bag/__pycache__/
+*.xlx
+*.xlsx
+*.csv

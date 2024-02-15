@@ -8,7 +8,7 @@
  Contact: Jonathan Shulgach (jshulgac@andrew.cmu.edu)
 
  This script parses a configuration file and prints the parameters to the console. The parameters can then be used to initialize a DataAgent object.
- """
+"""
 
 import os
 from data_agent import ArgParser

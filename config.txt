@@ -6,9 +6,10 @@
 #    initialization. The values associated with the parameters will keep their original forms
 #
 SUBJECT=TestUser
-SEARCH_PATH=/path/to/data/directory
-SAVE_PATH=/new/generating/data/directory
-PARAM_PATH=/path/to/ROS2yaml/or/textFile
-NEW_PATH=/new/path/for/moving/data
+SEARCH_PATH=/path/for/ros2/data
+#SAVE_PATH=/new/generating/data/directory
+#PARAM_PATH=/path/to/ROS2yaml/or/textFile
+#NEW_PATH=/new/path/for/moving/data
 VERBOSE=False
-
+NOTEBOOK_SHEET=Specified worksheet name
+NOTEBOOK_PATH=/path/to/notebook

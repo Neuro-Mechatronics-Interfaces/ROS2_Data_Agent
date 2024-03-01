@@ -34,9 +34,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Attempt to load parameters from a local config file
-    pars = ArgParser(file_path=os.path.join(os.getcwd(), 'myconfig.txt'), delimiter='=').scan_file()
-    # pars = ArgParser(file_path=args.config_file, delimiter='=', verbose=True).scan_file()
+    #pars = ArgParser(file_path=os.path.join(os.getcwd(), 'config_forrest.txt'), delimiter='=').scan_file()
+    pars = ArgParser(file_path=os.path.abspath(args.config_file), delimiter='=', verbose=True).scan_file()
 
+    #print(pars)
+    
     if args.subject is None:
         # Check is 'subject' key exists in python dict pars
         if 'subject' in pars:
@@ -119,6 +121,7 @@ if __name__ == '__main__':
     # Search for bag files
     assert agent.search_path is not None
     file_list = agent.search_for_files(date_tag=date)
+    print(file_list)
     for i, rec in enumerate(file_list):
         print("Reading bag files for {}, tag:{}:".format(rec['date'], rec['file_tag']))
         agent.read_bag(rec['files'], combine=True)  # this step can take a few minutes to an hour...
@@ -140,21 +143,21 @@ if __name__ == '__main__':
 
     # STEP 4. Update the subject notebook
     # Load the workbook. We also want to keep the original formatting styles the workbook has
-    agent.load_notebook(notebook_path)
+    #agent.load_notebook(notebook_path)
 
     # Find the row and column indices of the metrics names of interest for the correct date
-    col_indices = agent.find_notebook_columns(metrics.keys(), notebook_sheet)
-    row_index = agent.find_notebook_row(date, notebook_sheet)
+    #col_indices = agent.find_notebook_columns(metrics.keys(), notebook_sheet)
+    #row_index = agent.find_notebook_row(date, notebook_sheet)
 
     # Update the columns with the info from metrics, where the column index is the same as the key in metrics
-    print("Updating notebook with metrics...")
-    for key in metrics.keys():
-        if key in col_indices:
-            agent.write_to_sheet(notebook_sheet, row_index, col_indices[key], metrics[key])
+    #print("Updating notebook with metrics...")
+    #for key in metrics.keys():
+    #    if key in col_indices:
+    #        agent.write_to_sheet(notebook_sheet, row_index, col_indices[key], metrics[key])
 
     # Save updated workbook
-    agent.save_notebook(notebook_path, overwrite=True)
-    print("Finished saving to notebook")
+    #agent.save_notebook(notebook_path, overwrite=True)
+    #print("Finished saving to notebook")
 
 
 

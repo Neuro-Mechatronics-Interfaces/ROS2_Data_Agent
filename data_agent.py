@@ -229,9 +229,9 @@ def parse_str_date_info(string, year_format=None):
 
     """
     temp = re.search('[0-9]{6}', string)
-    dd = int(temp[0][4:6])
-    mm = int(temp[0][2:4])
-    yy = int(temp[0][:2])
+    dd = temp[0][4:6]
+    mm = temp[0][2:4]
+    yy = temp[0][:2]
     info_str = str(mm) + "/" + str(dd) + "/" + str(yy)
 
     return info_str, temp.group()
@@ -1450,7 +1450,9 @@ class DataAgent:
 
                 # If Specific date was requested, only collect files with matching date
                 if date_tag:
+                    #print(folder)
                     date_match, _ = parse_str_date_info(folder)
+                    #print(date_match)
                     if date_match != date_tag:
                         continue
 
